@@ -1,0 +1,6 @@
+# created by virtualenv automatically
+.venv/*
+*~
+*.ipynb_checkpoints*
+*.coveragerc
+*__pycache__*
