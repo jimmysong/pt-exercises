@@ -120,10 +120,10 @@ ecc:XOnlyTest:test_xonly:
 * However, there's now a bigger burden on the developer to "flip" the private key if the public key has an odd $y$
 * This also ends up being challenging to account for, especially with respect to aggregated signatures and aggregated pubkeys.
 
-Let's make a useful private-key flipping method in `PrivateKey`
+Let's make a useful private-key flipping method in `PrivateKey` and a point flipping method in S256Point
 #endmarkdown
 #unittest
-ecc:XOnlyTest:test_even_secret:
+ecc:XOnlyTest:test_even_methods:
 #endunittest
 """
 

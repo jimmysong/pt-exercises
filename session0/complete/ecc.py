@@ -418,13 +418,15 @@ class XOnlyTest(TestCase):
         point = S256Point.parse(bytes_x)
         self.assertEqual(point.xonly().hex(), hex_x)
 
-    def test_even_secret(self):
+    def test_even_methods(self):
         secret = 12345
         priv = PrivateKey(secret)
         self.assertEqual(priv.even_secret(), N - secret)
+        self.assertEqual(priv.point.even_point(), -1 * priv.point)
         secret = 93848
         priv = PrivateKey(secret)
         self.assertEqual(priv.even_secret(), secret)
+        self.assertEqual(priv.point.even_point(), priv.point)
 
 
 class Signature:

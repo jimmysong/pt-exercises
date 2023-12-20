@@ -271,7 +271,22 @@ class S256Point(Point):
     def xonly(self):
         """returns the binary version of X-only pubkey"""
         # if x is None, return 32 0 bytes
+        if self.x is None:
+            return b"\x00" * 32
         # otherwise, convert the x coordinate to Big Endian 32 bytes
+        return int_to_big_endian(self.x.num, 32)
+
+    def tweak(self, merkle_root=b""):
+        """returns the tweak for use in p2tr if there's no script path"""
+        # take the hash_taptweak of the xonly and the merkle root
+        raise NotImplementedError
+
+    def tweaked_key(self, merkle_root=b""):
+        """Creates the tweaked external key for a particular tweak."""
+        # Get the tweak with the merkle root
+        # t is the tweak interpreted as a big endian integer
+        # Q = P + tG
+        # return the external key
         raise NotImplementedError
 
     def hash160(self, compressed=True):
@@ -298,6 +313,13 @@ class S256Point(Point):
         """Returns the RedeemScript for a p2sh-p2wpkh redemption"""
         return self.p2wpkh_script().redeem_script()
 
+    def p2tr_script(self, merkle_root=b""):
+        """Returns the p2tr ScriptPubKey object"""
+        # from script import P2TRScriptPubKey to avoid circular dependency
+        # get the external pubkey
+        # return the P2TRScriptPubKey object
+        raise NotImplementedError
+
     def address(self, compressed=True, network="mainnet"):
         """Returns the p2pkh address string"""
         return self.p2pkh_script(compressed).address(network)
@@ -309,6 +331,10 @@ class S256Point(Point):
     def p2sh_p2wpkh_address(self, network="mainnet"):
         """Returns the p2sh-p2wpkh base58 address string"""
         return self.p2wpkh_script().p2sh_address(network)
+
+    def p2tr_address(self, merkle_root=b"", network="mainnet"):
+        """Returns the p2tr bech32m address string"""
+        return self.p2tr_script(merkle_root).address(network)
 
     def verify(self, z, sig):
         # remember sig.r and sig.s are the main things we're checking
@@ -332,10 +358,35 @@ class S256Point(Point):
         # verify the message using the self.verify method
         return self.verify(z, sig)
 
+
     def even_point(self):
         # if the parity property is True, the point is odd, so multiply by -1
         # otherwise, return the point itself
-        raise NotImplementedError
+        if self.parity:
+            return -1 * self
+        else:
+            return self
+
+    def verify_schnorr(self, msg, schnorr_sig):
+        # get the even point with the even_point method
+        point = self.even_point()
+        # if the sig's R is the point at infinity, return False
+        if schnorr_sig.r.x is None:
+            return False
+        # commitment is R||P||m use the xonly serializations
+        commitment = schnorr_sig.r.xonly() + point.xonly() + msg
+        # h is the hash_challenge of the commitment as a big endian integer
+        h = big_endian_to_int(hash_challenge(commitment))
+        # -hP+sG is what we want
+        target = -h * point + schnorr_sig.s * G
+        # if the resulting point is the point at infinity return False
+        if target.x is None:
+            return False
+        # if the resulting point's y is odd (use parity property) return False
+        if target.parity:
+            return False
+        # check that the xonly of the target is the same as the xonly of R
+        return target.xonly() == schnorr_sig.r.xonly()
 
     @classmethod
     def parse(cls, binary):
@@ -421,6 +472,72 @@ class XOnlyTest(TestCase):
         priv = PrivateKey(secret)
         self.assertEqual(priv.even_secret(), secret)
         self.assertEqual(priv.point.even_point(), priv.point)
+
+
+class TapRootTest(TestCase):
+    def test_default_tweak(self):
+        hex_x = "f01d6b9018ab421dd410404cb869072065522bf85734008f105cf385a023a80f"
+        bytes_x = bytes.fromhex(hex_x)
+        point = S256Point.parse(bytes_x)
+        self.assertEqual(
+            big_endian_to_int(point.tweak()),
+            67856885919469038205338506436839711332207972226461300386890540598589929564995,
+        )
+
+    def test_tweaked_key(self):
+        hex_x = "f01d6b9018ab421dd410404cb869072065522bf85734008f105cf385a023a80f"
+        bytes_x = bytes.fromhex(hex_x)
+        point = S256Point.parse(bytes_x)
+        self.assertEqual(
+            point.tweaked_key().xonly().hex(),
+            "5b9cfb912266844a6265820f268052b6c500a94ae498c8b50acc8f1c43db9daf",
+        )
+
+    def test_p2tr_script(self):
+        hex_x = "f01d6b9018ab421dd410404cb869072065522bf85734008f105cf385a023a80f"
+        bytes_x = bytes.fromhex(hex_x)
+        point = S256Point.parse(bytes_x)
+        self.assertEqual(
+            point.p2tr_script().__repr__(),
+            "OP_1 5b9cfb912266844a6265820f268052b6c500a94ae498c8b50acc8f1c43db9daf",
+        )
+
+    def test_private_tweaked_key(self):
+        secret = randint(1, N)
+        priv = PrivateKey(secret)
+        self.assertEqual(priv.tweaked_key().point, priv.point.tweaked_key())
+
+
+class SchnorrTest(TestCase):
+    def test_verify(self):
+        msg = sha256(b"I attest to understanding Schnorr Signatures")
+        sig_raw = bytes.fromhex(
+            "f3626c99fe36167e5fef6b95e5ed6e5687caa4dc828986a7de8f9423c0f77f9bc73091ed86085ce43de0e255b3d0afafc7eee41ddc9970c3dc8472acfcdfd39a"
+        )
+        sig = SchnorrSignature.parse(sig_raw)
+        point = S256Point.parse(
+            bytes.fromhex(
+                "f01d6b9018ab421dd410404cb869072065522bf85734008f105cf385a023a80f"
+            )
+        )
+        self.assertTrue(point.verify_schnorr(msg, sig))
+
+    def test_sign(self):
+        msg = sha256(b"I attest to understanding Schnorr Signatures")
+        priv = PrivateKey(12345)
+        sig = priv.sign_schnorr(msg)
+        self.assertEqual(
+            sig.serialize().hex(),
+            "f3626c99fe36167e5fef6b95e5ed6e5687caa4dc828986a7de8f9423c0f77f9bc73091ed86085ce43de0e255b3d0afafc7eee41ddc9970c3dc8472acfcdfd39a",
+        )
+
+    def test_bip340_k(self):
+        msg = sha256(b"Deterministic k generation")
+        priv = PrivateKey(837120557)
+        k = priv.bip340_k(msg)
+        self.assertEqual(
+            k, 59142679386349195458604976147959907507215885648178571847306375481691593063625
+        )
 
 
 class Signature:
@@ -535,6 +652,33 @@ class PrivateKey:
     def even_secret(self):
         # check if the public point is odd using the parity property
         # return N - secret if it is, secret otherwise
+        if self.point.parity:
+            return N - self.secret
+        else:
+            return self.secret
+
+    def bip340_k(self, msg, aux=None):
+        # k is generated using the aux variable, which can be set
+        # to a known value to make k deterministic
+        # the idea of k generation here is to mix in the private key
+        # and the msg to ensure it's unique and not reused
+        # t contains the secret, msg is added so it's unique to the
+        # message and private key
+        raise NotImplementedError
+
+    def sign_schnorr(self, msg, aux=None):
+        # e is the secret that generates an even y with the even_secret method
+        # get k using the self.bip340_k method
+        # get the resulting R=kG point
+        # if R's y coordinate is odd (use parity property), flip the k
+            # set k to N - k
+            # recalculate R
+        # calculate the commitment which is: R || P || msg
+        # h is hash_challenge of the commitment as a big endian integer mod N
+        # calculate s which is (k+eh) mod N
+        # create a SchnorrSignature object using the R and s
+        # check that this schnorr signature verifies
+        # return the signature
         raise NotImplementedError
 
     def deterministic_k(self, z):
@@ -583,6 +727,13 @@ class PrivateKey:
             suffix = b""
         # encode_base58_checksum the whole thing
         return encode_base58_checksum(prefix + secret_bytes + suffix)
+
+    def tweaked_key(self, merkle_root=b""):
+        # get the tweak from the point's tweak method
+        # t is the tweak interpreted as big endian
+        # new secret is the secret plus t (make sure to mod by N)
+        # create a new instance of this class using self.__class__
+        raise NotImplementedError
 
     @classmethod
     def parse(cls, wif):

@@ -1,3 +1,10 @@
+import sys
+
+sessions = [int(a) for a in sys.argv[1:]]
+if len(sessions) == 0:
+    sessions = range(5)
+
+
 def chop_word(s):
     for i, _ in enumerate(s):
         letter = s[i:i+1]
@@ -7,7 +14,7 @@ def chop_word(s):
 to_clear = {}
 files_methods = {}
 files_functions = {}
-for session_number in range(3):
+for session_number in sessions:
     session = f"session{session_number}"
     with open(f"{session}/complete/answers.py", "r") as file:
         parse = False
@@ -77,4 +84,3 @@ for session_number in range(3):
                         active = True
         with open(f"{session}/{filename}.py", "w") as file:
             file.write(modified_file)
-    

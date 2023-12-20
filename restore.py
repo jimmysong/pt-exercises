@@ -1,8 +1,13 @@
 from shutil import copy
+import sys
 
-for session_number in range(3):
+sessions = [int(a) for a in sys.argv[1:]]
+if len(sessions) == 0:
+    sessions = range(5)
+
+for session_number in sessions:
     session = f"session{session_number}"
-    file_names = {}
+    filenames = {}
     with open(f"{session}/complete/answers.py", "r") as file:
         parse = False
         for raw_line in file:
@@ -11,8 +16,9 @@ for session_number in range(3):
                 parse = False
             if parse:
                 components = line.split('.')
-                file_names[components[0]] = True
+                filenames[components[0]] = True
             if line == 'FUNCTIONS = """':
                 parse = True
-    for filename in file_names.keys():
+    for filename in filenames.keys():
+        print(f"{session}/complete/{filename}.py")
         copy(f"{session}/complete/{filename}.py", f"{session}/{filename}.py")

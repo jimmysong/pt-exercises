@@ -2,7 +2,9 @@ import nbformat
 import re
 import sys
 
-sessions = [0,1,2]
+sessions = [int(a) for a in sys.argv[1:]]
+if len(sessions) == 0:
+    sessions = range(3)
 
 FIRST_CELL = '''############## PLEASE RUN THIS CELL FIRST! ###################
 
