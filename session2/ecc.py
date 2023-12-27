@@ -226,10 +226,7 @@ class S256Point(Point):
             super().__init__(x=x, y=y, a=a, b=b)
         if x is None:
             return
-        if self.y.num % 2 == 1:
-            self.parity = 1
-        else:
-            self.parity = 0
+        self.even = self.y.num % 2 == 0
 
     def __eq__(self, other):
         return self.x == other.x and self.y == other.y
@@ -259,10 +256,10 @@ class S256Point(Point):
         # remember, you have to convert self.x.num/self.y.num to binary using int_to_big_endian
         x = int_to_big_endian(self.x.num, 32)
         if compressed:
-            if self.parity:
-                return b"\x03" + x
-            else:
+            if self.even:
                 return b"\x02" + x
+            else:
+                return b"\x03" + x
         else:
             # if non-compressed, starts with b'\x04' followod by self.x and then self.y
             y = int_to_big_endian(self.y.num, 32)
@@ -271,10 +268,8 @@ class S256Point(Point):
     def xonly(self):
         """returns the binary version of X-only pubkey"""
         # if x is None, return 32 0 bytes
-        if self.x is None:
-            return b"\x00" * 32
         # otherwise, convert the x coordinate to Big Endian 32 bytes
-        return int_to_big_endian(self.x.num, 32)
+        raise NotImplementedError
 
     def tweak(self, merkle_root=b""):
         """returns the tweak for use in p2tr if there's no script path"""
@@ -366,24 +361,14 @@ class S256Point(Point):
 
     def verify_schnorr(self, msg, schnorr_sig):
         # get the even point with the make_even method
-        point = self.make_even()
         # if the sig's R is the point at infinity, return False
-        if schnorr_sig.r.x is None:
-            return False
         # commitment is R||P||m use the xonly serializations
-        commitment = schnorr_sig.r.xonly() + point.xonly() + msg
         # h is the hash_challenge of the commitment as a big endian integer
-        h = big_endian_to_int(hash_challenge(commitment))
         # -hP+sG is what we want
-        target = -h * point + schnorr_sig.s * G
         # if the resulting point is the point at infinity return False
-        if target.x is None:
-            return False
         # if the resulting point's y is odd (use parity property) return False
-        if target.parity:
-            return False
         # check that the xonly of the target is the same as the xonly of R
-        return target.xonly() == schnorr_sig.r.xonly()
+        raise NotImplementedError
 
     @classmethod
     def parse(cls, binary):
@@ -580,7 +565,7 @@ class Signature:
 
 class SchnorrSignature:
     def __init__(self, r, s):
-        self.r = r
+        self.r = r.even_point()
         if s >= N:
             raise ValueError(f"{s:x} is greater than or equal to {N:x}")
         self.s = s
@@ -632,54 +617,31 @@ class PrivateKey:
         return Signature(r, s)
 
     def even_secret(self):
-        if self.point.parity:
-            return N - self.secret
-        else:
-            return self.secret
+        raise NotImplementedError
 
     def bip340_k(self, msg, aux=None):
         # k is generated using the aux variable, which can be set
         # to a known value to make k deterministic
         # the idea of k generation here is to mix in the private key
         # and the msg to ensure it's unique and not reused
-        if aux is None:
-            aux = b"\x00" * 32
-        e = self.even_secret()
-        if len(msg) != 32:
-            raise ValueError("msg needs to be 32 bytes")
-        if len(aux) != 32:
-            raise ValueError("aux needs to be 32 bytes")
         # t contains the secret, msg is added so it's unique to the
         # message and private key
-        t = xor_bytes(int_to_big_endian(e, 32), hash_aux(aux))
-        return big_endian_to_int(hash_nonce(t + self.point.xonly() + msg)) % N
+        raise NotImplementedError
 
     def sign_schnorr(self, msg, aux=None):
         # e is the secret that generates an even y with the even_secret method
-        e = self.even_secret()
         # get k using the self.bip340_k method
-        k = self.bip340_k(msg, aux)
         # get the resulting R=kG point
-        r = k * G
         # if R's y coordinate is odd (use parity property), flip the k
-        if r.parity:
             # set k to N - k
-            k = N - k
             # recalculate R
-            r = k * G
         # calculate the commitment which is: R || P || msg
-        commitment = r.xonly() + self.point.xonly() + msg
         # h is hash_challenge of the commitment as a big endian integer mod N
-        h = big_endian_to_int(hash_challenge(commitment)) % N
         # calculate s which is (k+eh) mod N
-        s = (k + e * h) % N
         # create a SchnorrSignature object using the R and s
-        schnorr = SchnorrSignature(r, s)
         # check that this schnorr signature verifies
-        if not self.point.verify_schnorr(msg, schnorr):
-            raise RuntimeError("Bad Signature")
         # return the signature
-        return schnorr
+        raise NotImplementedError
 
     def deterministic_k(self, z):
         k = b"\x00" * 32

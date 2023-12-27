@@ -58,9 +58,13 @@ class TapLeaf:
         """Assumes that this TapLeaf is the Merkle Root and constructs the
         control block"""
         external_pubkey = self.external_pubkey(internal_pubkey)
+        if external_pubkey.even:
+            parity = 0
+        else:
+            parity = 1
         return ControlBlock(
             self.tapleaf_version,
-            external_pubkey.parity,
+            parity,
             internal_pubkey,
             self.path_hashes(),
         )
@@ -111,9 +115,13 @@ class TapBranch:
         if leaf not in self.leaves():
             return None
         external_pubkey = self.external_pubkey(internal_pubkey)
+        if external_pubkey.even:
+            parity = 0
+        else:
+            parity = 1
         return ControlBlock(
             leaf.tapleaf_version,
-            external_pubkey.parity,
+            parity,
             internal_pubkey,
             self.path_hashes(leaf),
         )

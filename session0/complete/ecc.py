@@ -226,10 +226,7 @@ class S256Point(Point):
             super().__init__(x=x, y=y, a=a, b=b)
         if x is None:
             return
-        if self.y.num % 2 == 1:
-            self.parity = 1
-        else:
-            self.parity = 0
+        self.even = self.y.num % 2 == 0
 
     def __eq__(self, other):
         return self.x == other.x and self.y == other.y
@@ -259,10 +256,10 @@ class S256Point(Point):
         # remember, you have to convert self.x.num/self.y.num to binary using int_to_big_endian
         x = int_to_big_endian(self.x.num, 32)
         if compressed:
-            if self.parity:
-                return b"\x03" + x
-            else:
+            if self.even:
                 return b"\x02" + x
+            else:
+                return b"\x03" + x
         else:
             # if non-compressed, starts with b'\x04' followod by self.x and then self.y
             y = int_to_big_endian(self.y.num, 32)
@@ -336,12 +333,11 @@ class S256Point(Point):
         return self.verify(z, sig)
 
     def even_point(self):
-        # if the parity property is True, the point is odd, so multiply by -1
-        # otherwise, return the point itself
-        if self.parity:
-            return -1 * self
-        else:
+        # if the point is even, return itself, otherwise, multiply by -1
+        if self.even:
             return self
+        else:
+            return -1 * self
 
     @classmethod
     def parse(cls, binary):
@@ -487,7 +483,7 @@ class Signature:
 
 class SchnorrSignature:
     def __init__(self, r, s):
-        self.r = r
+        self.r = r.even_point()
         if s >= N:
             raise ValueError(f"{s:x} is greater than or equal to {N:x}")
         self.s = s
@@ -539,12 +535,12 @@ class PrivateKey:
         return Signature(r, s)
 
     def even_secret(self):
-        # check if the public point is odd using the parity property
-        # return N - secret if it is, secret otherwise
-        if self.point.parity:
-            return N - self.secret
-        else:
+        # check if the public point is even
+        # return secret if it is, N - secret otherwise
+        if self.point.even:
             return self.secret
+        else:
+            return N - self.secret
 
     def deterministic_k(self, z):
         k = b"\x00" * 32

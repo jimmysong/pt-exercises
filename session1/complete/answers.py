@@ -74,7 +74,7 @@ ecc:SchnorrTest:test_verify:
 >>> msg = sha256(b"I attest to understanding Schnorr Signatures")
 >>> k = 21016020145315867006318399104346325815084469783631925097217883979013588851039
 >>> r = k * G
->>> if r.parity:
+>>> if not r.even:
 ...     k = N - k
 ...     r = k * G
 >>> commitment = r.xonly() + priv.point.xonly() + msg
@@ -104,8 +104,8 @@ Sign the message b"I'm learning Taproot!" with the private key 21,000,000
 >>> e = priv.even_secret() #/
 >>> # calculate R which is kG
 >>> r = k * G  #/
->>> # if R's y coordinate is odd (use the parity property), flip the k
->>> if r.parity:  #/
+>>> # if R's y coordinate is odd, flip the k
+>>> if not r.even:  #/
 ...     # set k to N - k
 ...     k = N - k  #/
 ...     # recalculate R
@@ -174,8 +174,8 @@ Sign the message b"Deterministic k generation!" with the private key 837,120,557
 >>> k = big_endian_to_int(hash_nonce(t + private_key.point.xonly())) % N #/
 >>> # calculate R which is kG
 >>> r = k * G  #/
->>> # if R's y coordinate is odd (use the parity property), flip the k
->>> if r.parity:  #/
+>>> # if R's y coordinate is odd, flip the k
+>>> if not r.even:  #/
 ...     # set k to N - k
 ...     k = N - k  #/
 ...     # recalculate R

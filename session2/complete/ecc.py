@@ -226,10 +226,7 @@ class S256Point(Point):
             super().__init__(x=x, y=y, a=a, b=b)
         if x is None:
             return
-        if self.y.num % 2 == 1:
-            self.parity = 1
-        else:
-            self.parity = 0
+        self.even = self.y.num % 2 == 0
 
     def __eq__(self, other):
         return self.x == other.x and self.y == other.y
@@ -259,10 +256,10 @@ class S256Point(Point):
         # remember, you have to convert self.x.num/self.y.num to binary using int_to_big_endian
         x = int_to_big_endian(self.x.num, 32)
         if compressed:
-            if self.parity:
-                return b"\x03" + x
-            else:
+            if self.even:
                 return b"\x02" + x
+            else:
+                return b"\x03" + x
         else:
             # if non-compressed, starts with b'\x04' followod by self.x and then self.y
             y = int_to_big_endian(self.y.num, 32)
@@ -366,12 +363,11 @@ class S256Point(Point):
 
 
     def even_point(self):
-        # if the parity property is True, the point is odd, so multiply by -1
-        # otherwise, return the point itself
-        if self.parity:
-            return -1 * self
-        else:
+        # if the point is even, return itself, otherwise, multiply by -1
+        if self.even:
             return self
+        else:
+            return -1 * self
 
     def verify_schnorr(self, msg, schnorr_sig):
         # get the even point with the even_point method
@@ -388,11 +384,11 @@ class S256Point(Point):
         # if the resulting point is the point at infinity return False
         if target.x is None:
             return False
-        # if the resulting point's y is odd (use parity property) return False
-        if target.parity:
+        # if the resulting point's y is odd, return False
+        if not target.even:
             return False
-        # check that the xonly of the target is the same as the xonly of R
-        return target.xonly() == schnorr_sig.r.xonly()
+        # check that the target is the same as R
+        return target == schnorr_sig.r
 
     @classmethod
     def parse(cls, binary):
@@ -604,7 +600,7 @@ class Signature:
 
 class SchnorrSignature:
     def __init__(self, r, s):
-        self.r = r
+        self.r = r.even_point()
         if s >= N:
             raise ValueError(f"{s:x} is greater than or equal to {N:x}")
         self.s = s
@@ -656,12 +652,12 @@ class PrivateKey:
         return Signature(r, s)
 
     def even_secret(self):
-        # check if the public point is odd using the parity property
-        # return N - secret if it is, secret otherwise
-        if self.point.parity:
-            return N - self.secret
-        else:
+        # check if the public point is even
+        # return secret if it is, N - secret otherwise
+        if self.point.even:
             return self.secret
+        else:
+            return N - self.secret
 
     def bip340_k(self, msg, aux=None):
         # k is generated using the aux variable, which can be set
@@ -687,8 +683,8 @@ class PrivateKey:
         k = self.bip340_k(msg, aux)
         # get the resulting R=kG point
         r = k * G
-        # if R's y coordinate is odd (use parity property), flip the k
-        if r.parity:
+        # if R's y coordinate is odd, flip the k
+        if not r.even:
             # set k to N - k
             k = N - k
             # recalculate R

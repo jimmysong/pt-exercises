@@ -225,6 +225,7 @@ class S256Point(Point):
         else:
             super().__init__(x=x, y=y, a=a, b=b)
         if x is None:
+            self.even = True
             return
         self.even = self.y.num % 2 == 0
 
@@ -254,6 +255,11 @@ class S256Point(Point):
         # if compressed, starts with b'\x02' if self.y.num is even, b'\x03' if self.y is odd
         # then self.x.num
         # remember, you have to convert self.x.num/self.y.num to binary using int_to_big_endian
+        if self.x is None:
+            if compressed:
+                return bytes([0] * 33)
+            else:
+                return bytes([0] * 65)
         x = int_to_big_endian(self.x.num, 32)
         if compressed:
             if self.even:
@@ -267,22 +273,28 @@ class S256Point(Point):
 
     def xonly(self):
         """returns the binary version of X-only pubkey"""
-        # if x is None, return 32 0 bytes
+        # if x is None, it's the point at infinity
+        if self.x is None:
+            return G.xonly()  # per MuSig2 testing
         # otherwise, convert the x coordinate to Big Endian 32 bytes
-        raise NotImplementedError
+        return int_to_big_endian(self.x.num, 32)
 
     def tweak(self, merkle_root=b""):
         """returns the tweak for use in p2tr if there's no script path"""
         # take the hash_taptweak of the xonly and the merkle root
-        raise NotImplementedError
+        tweak = hash_taptweak(self.xonly() + merkle_root)
+        return tweak
 
     def tweaked_key(self, merkle_root=b""):
-        """Creates the tweaked external key for a particular tweak."""
-        # Get the tweak with the merkle root
+        """Creates the tweaked external key for a merkle root"""
+        # Get the tweak for the merkle root
+        tweak = self.tweak(merkle_root)
         # t is the tweak interpreted as a big endian integer
+        t = big_endian_to_int(tweak)
         # Q = P + tG
+        external_key = self + t * G
         # return the external key
-        raise NotImplementedError
+        return external_key
 
     def hash160(self, compressed=True):
         # get the sec
@@ -311,9 +323,11 @@ class S256Point(Point):
     def p2tr_script(self, merkle_root=b""):
         """Returns the p2tr ScriptPubKey object"""
         # from script import P2TRScriptPubKey to avoid circular dependency
+        from script import P2TRScriptPubKey
         # get the external pubkey
+        external_pubkey = self.tweaked_key(merkle_root)
         # return the P2TRScriptPubKey object
-        raise NotImplementedError
+        return P2TRScriptPubKey(external_pubkey)
 
     def address(self, compressed=True, network="mainnet"):
         """Returns the p2pkh address string"""
@@ -371,12 +385,12 @@ class S256Point(Point):
         commitment = schnorr_sig.r.xonly() + point.xonly() + msg
         # h is the hash_challenge of the commitment as a big endian integer
         h = big_endian_to_int(hash_challenge(commitment))
-        # -hP+sG is what we want
+        # target is -hP+sG
         target = -h * point + schnorr_sig.s * G
         # if the resulting point is the point at infinity return False
         if target.x is None:
             return False
-        # if the resulting point's y is odd  return False
+        # if the resulting point is odd return False
         if not target.even:
             return False
         # check that the target is the same as R
@@ -399,6 +413,11 @@ class S256Point(Point):
             x = int(sec_bin[1:33].hex(), 16)
             y = int(sec_bin[33:65].hex(), 16)
             return cls(x=x, y=y)
+        if sec_bin[0] == 0:
+            if sec_bin == bytes([0] * 33):
+                return cls(None, None)
+            else:
+                raise ValueError(f"{sec_bin} is not in SEC format")
         is_even = sec_bin[0] == 2
         x = S256Field(int(sec_bin[1:].hex(), 16))
         # right side of the equation y^2 = x^3 + 7
@@ -430,11 +449,13 @@ class S256Point(Point):
         y_squared = x**3 + S256Field(B)
         # use the sqrt() method on y_squared to get a possible y
         y = y_squared.sqrt()
-        # flip the y to its complement (P - y.num) if it's odd
-        if y.num % 2 == 1:
-            y = S256Field(P - y.num)
-        # return the point defined by x and y
-        return cls(x, y)
+        # create the point
+        point = cls(x, y)
+        # if the point is odd, multiply by -1
+        if point.even:
+            return point
+        else:
+            return -1 * point
 
     @classmethod
     def combine(cls, points):
@@ -646,31 +667,54 @@ class PrivateKey:
     def even_secret(self):
         # check if the public point is even
         # return secret if it is, N - secret otherwise
-        raise NotImplementedError
+        if self.point.even:
+            return self.secret
+        else:
+            return N - self.secret
 
     def bip340_k(self, msg, aux=None):
         # k is generated using the aux variable, which can be set
         # to a known value to make k deterministic
         # the idea of k generation here is to mix in the private key
         # and the msg to ensure it's unique and not reused
+        if aux is None:
+            aux = b"\x00" * 32
+        e = self.even_secret()
+        if len(msg) != 32:
+            raise ValueError("msg needs to be 32 bytes")
+        if len(aux) != 32:
+            raise ValueError("aux needs to be 32 bytes")
         # t contains the secret, msg is added so it's unique to the
         # message and private key
-        raise NotImplementedError
+        t = xor_bytes(int_to_big_endian(e, 32), hash_aux(aux))
+        return big_endian_to_int(hash_nonce(t + self.point.xonly() + msg)) % N
 
     def sign_schnorr(self, msg, aux=None):
         # e is the secret that generates an even y with the even_secret method
+        e = self.even_secret()
         # get k using the self.bip340_k method
+        k = self.bip340_k(msg, aux)
         # get the resulting R=kG point
-        # if R's y coordinate is odd flip the k
+        r = k * G
+        # if R's y coordinate is odd, flip the k
+        if not r.even:
             # set k to N - k
+            k = N - k
             # recalculate R
+            r = k * G
         # calculate the commitment which is: R || P || msg
+        commitment = r.xonly() + self.point.xonly() + msg
         # h is hash_challenge of the commitment as a big endian integer mod N
+        h = big_endian_to_int(hash_challenge(commitment)) % N
         # calculate s which is (k+eh) mod N
+        s = (k + e * h) % N
         # create a SchnorrSignature object using the R and s
+        schnorr = SchnorrSignature(r, s)
         # check that this schnorr signature verifies
+        if not self.point.verify_schnorr(msg, schnorr):
+            raise RuntimeError("Bad Signature")
         # return the signature
-        raise NotImplementedError
+        return schnorr
 
     def deterministic_k(self, z):
         k = b"\x00" * 32
@@ -721,10 +765,13 @@ class PrivateKey:
 
     def tweaked_key(self, merkle_root=b""):
         # get the tweak from the point's tweak method
+        tweak = self.point.tweak(merkle_root)
         # t is the tweak interpreted as big endian
+        t = big_endian_to_int(tweak)
         # new secret is the secret plus t (make sure to mod by N)
+        new_secret = (self.secret + t) % N
         # create a new instance of this class using self.__class__
-        raise NotImplementedError
+        return self.__class__(new_secret)
 
     @classmethod
     def parse(cls, wif):
