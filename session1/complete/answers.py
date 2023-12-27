@@ -1,6 +1,6 @@
 """
 #code
->>> import ecc, hash, op, script, taproot
+>>> import ecc
 
 #endcode
 #markdown
