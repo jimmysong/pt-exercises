@@ -230,6 +230,8 @@ class S256Point(Point):
         self.even = self.y.num % 2 == 0
 
     def __eq__(self, other):
+        if other is None:
+            return False
         return self.x == other.x and self.y == other.y
 
     def __repr__(self):
@@ -458,7 +460,7 @@ class S256Point(Point):
             return -1 * point
 
     @classmethod
-    def combine(cls, points):
+    def sum(cls, points):
         sum_point = points[0]
         for point in points[1:]:
             sum_point += point

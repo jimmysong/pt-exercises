@@ -15,61 +15,65 @@ from helper import big_endian_to_int, int_to_big_endian, xor_bytes
 
 class Tweak:
     """Represents the displacement for a group point"""
-    def __init__(self, amount, xonly=True):
+    def __init__(self, amount, xonly=False):
         # the amount of displacement of a group point
         self.amount = amount
-        # whether the result of the tweak should be an xonly point
-        # each time it is and the resulting group point is odd
-        # we negate and "flip"
+        # whether the group point should be treated as xonly before applying the tweak
         self.xonly = xonly
 
 
-class AggNonce:
-    """Represents the sum of all the nonces submitted"""
+class NonceAggregator:
+    """Represents the nonces submitted"""
 
-    def __init__(self, r1, r2):
-        self.r1 = r1
-        self.r2 = r2
+    def __init__(self, s, t):
+        self.s = s
+        self.t = t
 
     def serialize(self):
-        return self.r1.sec() + self.r2.sec()
+        return self.s.sec() + self.t.sec()
 
-    def r(self, coef):
-        return self.r1 + coef * self.r2
+    def nonce_point(self, coef):
+        return self.s + coef * self.t
+
+    @classmethod
+    def from_nonce_shares(cls, nonce_shares):
+        s = S256Point.sum([share.s for share in nonce_shares])
+        t = S256Point.sum([share.t for share in nonce_shares])
+        return cls(s, t)
 
     @classmethod
     def parse(cls, raw):
-        r1 = S256Point.parse(raw[:33])
-        r2 = S256Point.parse(raw[33:])
-        return cls(r1, r2)
+        s = S256Point.parse(raw[:33])
+        t = S256Point.parse(raw[33:])
+        return cls(s, t)
 
 
 class NoncePrivateShare:
     """Represents the k's that are used in signing"""
 
-    def __init__(self, k1, k2, pubkey):
-        if k1 <= 0 or k1 >= N or k2 <= 0 or k2 >= N:
+    def __init__(self, l, m, pubkey):
+        if l <= 0 or l >= N or m <= 0 or m >= N:
             raise ValueError("nonce is out of range")
-        self.k1 = k1
-        self.k2 = k2
+        self.l = l
+        self.m = m
         self.pubkey = pubkey
-        self.public_share = NoncePublicShare(k1 * G, k2 * G)
+        self.public_share = NoncePublicShare(l * G, m * G)
 
     def negate(self):
-        return self.__class__(N - self.k1, N - self.k2, self.pubkey)
+        return self.__class__(N - self.l, N - self.m, self.pubkey)
 
     def k(self, coef):
-        return (self.k1 + coef * self.k2) % N
+        return (self.l + coef * self.m) % N
 
     @classmethod
     def parse(cls, b):
-        k1 = big_endian_to_int(b[:32])
-        k2 = big_endian_to_int(b[32:64])
+        l = big_endian_to_int(b[:32])
+        m = big_endian_to_int(b[32:64])
         pubkey = S256Point.parse(b[64:])
-        return cls(k1, k2, pubkey)
+        return cls(l, m, pubkey)
 
     @classmethod
-    def generate_nonce(
+    def generate_nonce_share(
         cls, pubkey, priv=None, aggregate_pubkey=None, msg=None, extra=None, rand=None
     ):
         """Nonce generation algorithm per BIP327"""
@@ -91,75 +95,93 @@ class NoncePrivateShare:
         if extra is None:
             extra = b""
         preimage += int_to_big_endian(len(extra), 4) + extra
-        k1 = big_endian_to_int(hash_musignonce(preimage + b"\x00")) % N
-        k2 = big_endian_to_int(hash_musignonce(preimage + b"\x01")) % N
-        return cls(k1, k2, pubkey)
+        l = big_endian_to_int(hash_musignonce(preimage + b"\x00")) % N
+        m = big_endian_to_int(hash_musignonce(preimage + b"\x01")) % N
+        return cls(l, m, pubkey)
 
 
 class NoncePublicShare:
     """Represents the participant r's that are summed for group nonce creation"""
 
-    def __init__(self, r1, r2):
-        self.r1 = r1
-        self.r2 = r2
+    def __init__(self, s, t):
+        self.s = s
+        self.t = t
 
     def r(self, coef):
-        return self.r1 + coef * self.r2
+        return self.s + coef * self.t
 
     @classmethod
     def parse(cls, b):
-        r1 = S256Point.parse(b[:33])
-        r2 = S256Point.parse(b[33:])
-        return cls(r1, r2)
-
-    @classmethod
-    def aggregate(cls, public_shares):
-        sum_1 = S256Point.combine([p.r1 for p in public_shares])
-        sum_2 = S256Point.combine([p.r2 for p in public_shares])
-        return AggNonce(sum_1, sum_2)
+        s = S256Point.parse(b[:33])
+        t = S256Point.parse(b[33:])
+        return cls(s, t)
 
 
-class KeyAggContext:
+class KeyAggregator:
     """Structure for aggregating keys to a group point for MuSig2"""
 
-    def __init__(self, points, tweaks=None, g_acc=1, t_acc=0):
+    def __init__(self, points, merkle_root=None, tweaks=None, g_acc=1, t_acc=0):
         # the points that make up the MuSig2 aggregate key
         self.points = points
         # keeps track of tweak flips due to xonly keys
         self.g_acc = g_acc
         # keeps track of the accumulated tweaks
         self.t_acc = t_acc
-        # compute the aggregated key group commitment, L
-        self.secs = [p.sec() for p in self.points]
-        self.group_commitment = hash_keyagglist(b"".join(self.secs))
-        # The coefficient for each public key is H(L||P), which we compute
-        self.coefs = [self.keyagg_coef(point.sec()) for point in self.points]
+        # compute the group commitment, L
+        self.group_commitment = self.calculate_group_commitment()
         # The group point
-        self.group_point = S256Point.combine(
-            [c * p for c, p in zip(self.coefs, self.points)]
-        )
+        self.group_point = self.calculate_group_point()
+        if merkle_root is not None and tweaks is not None:
+            raise RuntimeError("Cannot have both merkle root and tweaks")
+        if merkle_root is not None:
+            self.t_acc += big_endian_to_int(self.group_point.tweak(merkle_root))
+            self.group_point = self.group_point.tweaked_key(merkle_root)
         # apply any displacements from tweaks
         if tweaks is not None:
             for tweak in tweaks:
                 self.apply_tweak(tweak)
 
-    def keyagg_coef(self, sec):
+    def calculate_group_commitment(self):
+        # start with the preimage being an empty byte-string
+        preimage = b""
+        # loop through the points
+        for point in self.points:
+            # concatenate the compressed sec of each point to the preimage
+            preimage += point.sec()
+        # return the hash_keyagglist of the preimage
+        return hash_keyagglist(preimage)
+
+    def calculate_group_point(self):
+        # create a list of terms for collecting the sum
+        terms = []
+        # loop through the points
+        for point in self.points:
+            # calculate the coefficient using keyagg_coef
+            coef = self.keyagg_coef(point)
+            # append the coef times the point to the terms
+            terms.append(coef * point)
+        # return the sum of the terms using S256Point.sum
+        return S256Point.sum(terms)
+
+    def keyagg_coef(self, point):
         """the coefficient for each pubkey, based on the group commitment and
         the individual pubkey, except for the second point, which is 1"""
-        # make sure sec pubkey is in the list of pubkeys
-        if sec not in self.secs:
-            raise ValueError(f"{sec.hex()} is not a participant")
+        # if the point is not in the list of points, raise a ValueError
+        if point not in self.points:
+            raise ValueError(f"{point.sec().hex()} is not a participant")
         # the second point has a coefficient of 1, everything else uses H(L||P)
+        second_point = None
         for p in self.points:
             if p != self.points[0]:
                 second_point = p
                 break
-        else:
-            second_point = S256Point(None, None)
-        if sec == second_point.sec():
+        # if the point is the same as the second_point, return 1
+        if point == second_point:
             return 1
-        # coefficient is expressed as a number, H(L||P)
-        return big_endian_to_int(hash_keyaggcoef(self.group_commitment + sec))
+        # coefficient is H(L||P) converted from big endian to an integer
+        # where H is hash_keyaggcoef, L is the group commitment, and P is
+        # the compressed sec serialization of the point
+        return big_endian_to_int(hash_keyaggcoef(self.group_commitment + point.sec()))
 
     def apply_tweak(self, tweak):
         """Apply a tweak to the current key aggregation"""
@@ -187,36 +209,67 @@ class KeyAggContext:
         self.t_acc = (g * self.t_acc + t) % N
 
 
+class KeyAggTest(TestCase):
+
+    def test_compute_group_commitment(self):
+        raw_pubkeys = [
+            "034a5169f673aa632f538aaa128b6348536db2b637fd89073d49b6a23879cdb3ad",
+            "0225fa6a4190ddc87d9f9dd986726cafb901e15c21aafd2ed729efed1200c73de8",
+            "03ed214e8ce499d92a2085e7e6041b4f081c7d29d8770057fc705a131d2918fcdb",
+            "02609ae8d31e3b290e74483776c1c8dfc2756b87d9635d654eb9e1ca95c228b169",
+            "02ffe558e388852f0120e46af2d1b370f85854a8eb0841811ece0e3e03d282d57c",
+            "02d42d696f2c343dc67d80fcd85dbbdb2edef3cac71126625d0cbcacc231a00015",
+        ]
+        points = [S256Point.parse(bytes.fromhex(r)) for r in raw_pubkeys]
+        keyagg = KeyAggregator(points)
+        self.assertEqual(keyagg.group_commitment.hex(), "9a02b1f7c524456922ec47b4db33810e244866f68a5d4478fc5b83c43231dad0")
+
+    def test_compute_group_point(self):
+        raw_pubkeys = [
+            "034a5169f673aa632f538aaa128b6348536db2b637fd89073d49b6a23879cdb3ad",
+            "0225fa6a4190ddc87d9f9dd986726cafb901e15c21aafd2ed729efed1200c73de8",
+            "03ed214e8ce499d92a2085e7e6041b4f081c7d29d8770057fc705a131d2918fcdb",
+            "02609ae8d31e3b290e74483776c1c8dfc2756b87d9635d654eb9e1ca95c228b169",
+            "02ffe558e388852f0120e46af2d1b370f85854a8eb0841811ece0e3e03d282d57c",
+            "02d42d696f2c343dc67d80fcd85dbbdb2edef3cac71126625d0cbcacc231a00015",
+        ]
+        points = [S256Point.parse(bytes.fromhex(r)) for r in raw_pubkeys]
+        keyagg = KeyAggregator(points)
+        self.assertEqual(keyagg.group_point.sec().hex(), "03628b3911ec6818290dbc40e0039652ceac6bef4355c6b461af870d0aafa123a0")
+
+
 class SigningContext:
     """Represents the data needed for a participant to sign a message"""
 
-    def __init__(self, points, msg, agg_nonce, tweaks=None):
+    def __init__(self, keyagg, nonceagg, msg):
         # keyagg will make the group point
-        self.keyagg = KeyAggContext(points, tweaks)
+        self.keyagg = keyagg
+        # the group nonce we are using
+        self.nonceagg = nonceagg
         # the message we are signing
         self.msg = msg
-        # the group nonce we are using
-        self.agg_nonce = agg_nonce
         # make the group point available for convenience
         self.group_point = self.keyagg.group_point
+        # make the nonce point available for convenience
+        self.nonce_point = self.group_nonce_point()
 
-    def keyagg_coef(self, sec):
+    def keyagg_coef(self, point):
         """Convenience method"""
-        return self.keyagg.keyagg_coef(sec)
+        return self.keyagg.keyagg_coef(point)
 
     def nonce_coef(self):
         """the coefficient in front of the second nonce determined by the msg"""
-        preimage = self.agg_nonce.serialize() + self.group_point.xonly() + self.msg
+        preimage = self.nonceagg.serialize() + self.group_point.xonly() + self.msg
         return big_endian_to_int(hash_musignoncecoef(preimage))
 
-    def group_r(self):
-        """r = r1 + c * r2 where c is the nonce coefficient, dependent on msg"""
-        return self.agg_nonce.r(self.nonce_coef())
+    def group_nonce_point(self):
+        """r = s + c * t where c is the nonce coefficient, dependent on msg"""
+        return self.nonceagg.nonce_point(self.nonce_coef())
 
     def challenge(self):
         """The message being signed by each participant so it aggregates to
         a single signature. This is what will get verified in the end"""
-        preimage = self.group_r().xonly() + self.group_point.xonly() + self.msg
+        preimage = self.group_nonce_point().xonly() + self.group_point.xonly() + self.msg
         return big_endian_to_int(hash_challenge(preimage))
 
     def verify(self, partial_sig, nonce_public_share, point):
@@ -225,15 +278,15 @@ class SigningContext:
         # get the nonce point for this particular pubkey
         working_r = nonce_public_share.r(self.nonce_coef())
         # we flip if we have a group r that's odd
-        if not self.group_r().even:
+        if not self.group_nonce_point().even:
             working_r = -1 * working_r
         # get the number of times tweaks flipped
         g_acc = self.keyagg.g_acc
         # flip again if our group point is odd, since we're using xonly keys
         if self.group_point.even:
-            keyagg_coef = g_acc * self.keyagg_coef(point.sec())
+            keyagg_coef = g_acc * self.keyagg_coef(point)
         else:
-            keyagg_coef = -1 * g_acc * self.keyagg_coef(point.sec())
+            keyagg_coef = -1 * g_acc * self.keyagg_coef(point)
         # return whether sG = R + abP
         s = big_endian_to_int(partial_sig)
         return s * G == working_r + keyagg_coef * self.challenge() * point
@@ -249,28 +302,33 @@ class MuSigParticipant:
         if private_share and self.point != self.private_share.pubkey:
             raise ValueError("Nonce does not correspond to the participant")
 
-    def generate_nonce(self, aggregate_pubkey=None, msg=None, extra=None, rand=None):
-        self.private_share = NoncePrivateShare.generate(
-            self.point, self.private_key.secret, aggregate_pubkey, msg, extra, rand
+    def generate_nonce_share(self, aggregate_pubkey=None, msg=None, extra=None, rand=None):
+        self.private_share = NoncePrivateShare.generate_nonce_share(
+            self.point, self.private_key, aggregate_pubkey, msg, extra, rand
         )
         return self.private_share.public_share
+
+    def my_nonce(self, coef):
+        if self.private_share is None:
+            raise RuntimeError("Nonce shares have not been defined yet")
+        return self.private_share.k(coef)
 
     def sign(self, context):
         """Sign the message in the context using the nonces in the context"""
         # If the group r is odd, we need to negate the k
-        k = self.private_share.k(context.nonce_coef())
-        if context.group_r().even:
+        k = self.my_nonce(context.nonce_coef())
+        if context.group_nonce_point().even:
             working_k = k
         else:
             working_k = N - k
         # get this point's keyagg coefficient (a)
-        keyagg_coef = context.keyagg_coef(self.point.sec())
+        keyagg_coef = context.keyagg_coef(self.point)
         # if the group point is odd, we need to negate the secret (e)
-        secret = context.keyagg.g_acc * self.private_key.secret % N
-        if context.group_point.even:
-            working_secret = secret
-        else:
-            working_secret = -1 * secret % N
+        # it also needs to be negated the number of times it's been flipped
+        g = context.keyagg.g_acc
+        if not context.group_point.even:
+            g *= -1
+        working_secret = g * self.private_key.secret % N
         # s = k + a * b * e, where b is the challenge
         s = (working_k + keyagg_coef * context.challenge() * working_secret) % N
         # the partial signature is s as big endian, 32 bytes
@@ -286,7 +344,7 @@ class MuSigCoordinator:
     """Coordinator that collects nonces and partial signatures and generates the
     final SchnorrSignature"""
 
-    def __init__(self, participant_points, sort=True):
+    def __init__(self, participant_points, tweaks=None, sort=True):
         if len(participant_points) == 0:
             raise ValueError("Need at least one public key")
         # sort the points by their xonly representation and use their even versions
@@ -297,14 +355,28 @@ class MuSigCoordinator:
             self.secs = [p.sec() for p in participant_points]
             self.points = participant_points
         self.nonce_shares = {}
-        self.agg_nonce = None
+        self.keyagg = KeyAggregator(self.points, tweaks=tweaks)
+        self.group_point = self.keyagg.group_point
+        self.nonceagg = None
         self.sig_shares = {}
         self.signing_context = None
 
-    def create_signing_context(self, msg, tweaks=None):
+    def compute_nonce_point(self, msg):
+        # calculate nonce share sums, s and t from the nonce shares
+        s = S256Point.sum([share.s for share in self.nonce_shares.values()])
+        t = S256Point.sum([share.t for share in self.nonce_shares.values()])
+        # the preimage is s's sec, t's sec, the group point's xonly and message
+        preimage = s.sec() + t.sec() + self.group_point.xonly() + msg
+        # nonce_coef is hash_musignoncecoef of the preimage as a big endian int
+        nonce_coef = big_endian_to_int(hash_musignoncecoef(preimage))
+        # the nonce point is R=S+bT
+        r = s + nonce_coef * t
+        return r
+
+    def create_signing_context(self, msg):
         """Create the data needed by each participant to sign"""
-        self.compute_nonce()
-        self.signing_context = SigningContext(self.points, msg, self.agg_nonce, tweaks)
+        self.aggregate_nonce_shares()
+        self.signing_context = SigningContext(self.keyagg, self.nonceagg, msg)
         return self.signing_context
 
     def clear_nonces(self):
@@ -313,14 +385,14 @@ class MuSigCoordinator:
     def register_nonce_share(self, sec, nonce_public_share):
         self.nonce_shares[sec] = nonce_public_share
 
-    def compute_nonce(self):
-        """Compute the aggregated nonce (r1 and r2)"""
-        if self.agg_nonce is None:
+    def aggregate_nonce_shares(self):
+        """Compute the aggregated nonce (s and t)"""
+        if self.nonceagg is None:
             for sec in self.secs:
                 if not self.nonce_shares.get(sec):
                     raise RuntimeError("Not everyone has registered a nonce")
-            self.agg_nonce = NoncePublicShare.aggregate(self.nonce_shares.values())
-        return self.agg_nonce
+            self.nonceagg = NonceAggregator.from_nonce_shares(self.nonce_shares.values())
+        return self.nonceagg
 
     def register_sig_share(self, sec, sig_share):
         """Register the signature share for a particular pubkey"""
@@ -338,27 +410,44 @@ class MuSigCoordinator:
     def compute_sig(self, msg):
         """Aggregates the signatures"""
         for sec in self.secs:
-            if not self.nonce_shares.get(sec):
+            if not self.sig_shares.get(sec):
                 raise RuntimeError("Not everyone has registered a partial sig")
         # sum up the partial signatures to a complete s
         s = sum(self.sig_shares.values()) % N
         # get the r from the signing context
-        group_r = self.signing_context.group_r()
+        group_nonce_point = self.signing_context.group_nonce_point()
         # if we've tweaked, we need to shift the s by that amount
         t_acc = self.signing_context.keyagg.t_acc
         if t_acc:
-            # challenge b = H(R||Q||m)
-            b = self.signing_context.challenge()
+            # challenge d = H(R||Q||m)
+            d = self.signing_context.challenge()
             # if the group point Q is odd, we negate the shift
-            if not self.signing_context.group_point.even:
+            if not self.group_point.even:
                 t_acc *= -1
-            s = (s + b * t_acc) % N
+            s = (s + d * t_acc) % N
         # create the signature
-        signature = SchnorrSignature(group_r, s)
+        signature = SchnorrSignature(group_nonce_point, s)
         # sanity check that the generated signature validates
         if not self.signing_context.group_point.verify_schnorr(msg, signature):
             raise RuntimeError("Signature does not validate")
         return signature
+
+
+class NonceAggTest(TestCase):
+
+    def test_compute_nonce_point(self):
+        participant_1 = MuSigParticipant(PrivateKey(1000))
+        participant_2 = MuSigParticipant(PrivateKey(2000))
+        msg = b"Hello World!"
+        nonce_share_1 = NoncePrivateShare(3000, 4000, participant_1.point)
+        nonce_share_2 = NoncePrivateShare(5000, 6000, participant_2.point)
+        pubkeys = [participant_1.point, participant_2.point]
+        coor = MuSigCoordinator(pubkeys)
+        coor.register_nonce_share(participant_1.point.sec(), nonce_share_1.public_share)
+        coor.register_nonce_share(participant_2.point.sec(), nonce_share_2.public_share)
+        nonce_point = coor.compute_nonce_point(msg)
+        want_sec = "0254d698964537d2f322797ef5f38307516789b22f27da7d5e6855447ea2b50aff"
+        self.assertEqual(nonce_point.sec().hex(), want_sec)
 
 
 class MuSigTest(TestCase):
@@ -454,22 +543,21 @@ class MuSigTest(TestCase):
         for test in test_data["valid_test_cases"]:
             raw_pubkeys = [test_data["pubkeys"][i] for i in test["key_indices"]]
             pubkeys = [S256Point.parse(bytes.fromhex(raw)) for raw in raw_pubkeys]
-            context = KeyAggContext(pubkeys)
+            keyagg = KeyAggregator(pubkeys)
             self.assertEqual(
-                context.group_point.xonly().hex().upper(), test["expected"]
+                keyagg.group_point.xonly().hex().upper(), test["expected"]
             )
         for test in test_data["error_test_cases"]:
             with self.assertRaises(ValueError):
                 raw_pubkeys = [test_data["pubkeys"][i] for i in test["key_indices"]]
                 pubkeys = [S256Point.parse(bytes.fromhex(raw)) for raw in raw_pubkeys]
-                raw_tweaks = [test_data["tweaks"][i] for i in test["tweak_indices"]]
                 tweaks = [
-                    Tweak(bytes.fromhex(raw), xonly)
-                    for raw, xonly in zip(raw_tweaks, test["is_xonly"])
+                    Tweak(bytes.fromhex(test_data["tweaks"][i]), xonly)
+                    for i, xonly in zip(test["tweak_indices"], test["is_xonly"])
                 ]
-                context = KeyAggContext(pubkeys)
+                keyagg = KeyAggregator(pubkeys)
                 for tweak in tweaks:
-                    context.apply_tweak(tweak)
+                    keyagg.apply_tweak(tweak)
 
     def test_nonce_generation(self):
         tests = [
@@ -525,19 +613,19 @@ class MuSigTest(TestCase):
             )
             msg = test["msg"] and bytes.fromhex(test["msg"])
             extra = test["extra_in"] and bytes.fromhex(test["extra_in"])
-            priv_share = NoncePrivateShare.generate_nonce(
+            priv_share = NoncePrivateShare.generate_nonce_share(
                 pubkey, priv, aggregate, msg, extra, rand
             )
-            want_k1 = big_endian_to_int(bytes.fromhex(test["expected_secnonce"][:64]))
-            want_k2 = big_endian_to_int(
+            want_l = big_endian_to_int(bytes.fromhex(test["expected_secnonce"][:64]))
+            want_m = big_endian_to_int(
                 bytes.fromhex(test["expected_secnonce"][64:128])
             )
-            want_r1 = S256Point.parse(bytes.fromhex(test["expected_pubnonce"][:66]))
-            want_r2 = S256Point.parse(bytes.fromhex(test["expected_pubnonce"][66:]))
-            self.assertEqual(want_k1, priv_share.k1)
-            self.assertEqual(want_k2, priv_share.k2)
-            self.assertEqual(want_r1, priv_share.public_share.r1)
-            self.assertEqual(want_r2, priv_share.public_share.r2)
+            want_s = S256Point.parse(bytes.fromhex(test["expected_pubnonce"][:66]))
+            want_t = S256Point.parse(bytes.fromhex(test["expected_pubnonce"][66:]))
+            self.assertEqual(want_l, priv_share.l)
+            self.assertEqual(want_m, priv_share.m)
+            self.assertEqual(want_s, priv_share.public_share.s)
+            self.assertEqual(want_t, priv_share.public_share.t)
 
     def test_nonce_aggregation(self):
         test_data = {
@@ -600,8 +688,8 @@ class MuSigTest(TestCase):
                 raw = bytes.fromhex(test_data["pnonces"][pnonce_index])
                 nonce_share = NoncePublicShare.parse(raw)
                 coor.register_nonce_share(pubkeys[i].sec(), nonce_share)
-            agg_nonce = coor.compute_nonce()
-            self.assertEqual(agg_nonce.serialize(), bytes.fromhex(test["expected"]))
+            nonceagg = coor.aggregate_nonce_shares()
+            self.assertEqual(nonceagg.serialize(), bytes.fromhex(test["expected"]))
         for test in test_data["error_test_cases"]:
             pubkeys = [
                 PrivateKey(i + 1).point for i in range(len(test["pnonce_indices"]))
@@ -612,7 +700,7 @@ class MuSigTest(TestCase):
                     raw = bytes.fromhex(test_data["pnonces"][pnonce_index])
                     nonce_share = NoncePublicShare.parse(raw)
                     coor.register_nonce_share(pubkeys[i].sec(), nonce_share)
-                coor.compute_nonce()
+                coor.aggregate_nonce_shares()
 
     def test_signature_aggregation(self):
         test_data = {
@@ -702,19 +790,18 @@ class MuSigTest(TestCase):
         for test in test_data["valid_test_cases"]:
             raw_pubkeys = [test_data["pubkeys"][i] for i in test["key_indices"]]
             pubkeys = [S256Point.parse(bytes.fromhex(raw)) for raw in raw_pubkeys]
-            coor = MuSigCoordinator(pubkeys, sort=False)
-            raw_tweaks = [test_data["tweaks"][i] for i in test["tweak_indices"]]
             tweaks = [
-                Tweak(bytes.fromhex(raw), xonly)
-                for raw, xonly in zip(raw_tweaks, test["is_xonly"])
+                Tweak(bytes.fromhex(test_data["tweaks"][i]), xonly)
+                for i, xonly in zip(test["tweak_indices"], test["is_xonly"])
             ]
+            coor = MuSigCoordinator(pubkeys, tweaks, False)
             for i, pnonce_index in enumerate(test["nonce_indices"]):
                 raw = bytes.fromhex(test_data["pnonces"][pnonce_index])
                 nonce_share = NoncePublicShare.parse(raw)
                 coor.register_nonce_share(pubkeys[i].sec(), nonce_share)
-            agg_nonce = coor.compute_nonce()
-            self.assertEqual(agg_nonce.serialize(), bytes.fromhex(test["aggnonce"]))
-            coor.create_signing_context(msg, tweaks)
+            nonceagg = coor.aggregate_nonce_shares()
+            self.assertEqual(nonceagg.serialize(), bytes.fromhex(test["aggnonce"]))
+            coor.create_signing_context(msg)
             for i, psig_index in enumerate(test["psig_indices"]):
                 raw = test_data["psigs"][psig_index]
                 partial_s = bytes.fromhex(raw)
@@ -726,19 +813,18 @@ class MuSigTest(TestCase):
         for test in test_data["error_test_cases"]:
             raw_pubkeys = [test_data["pubkeys"][i] for i in test["key_indices"]]
             pubkeys = [S256Point.parse(bytes.fromhex(raw)) for raw in raw_pubkeys]
-            coor = MuSigCoordinator(pubkeys, sort=False)
-            raw_tweaks = [test_data["tweaks"][i] for i in test["tweak_indices"]]
             tweaks = [
-                Tweak(bytes.fromhex(raw), xonly)
-                for raw, xonly in zip(raw_tweaks, test["is_xonly"])
+                Tweak(bytes.fromhex(test_data["tweaks"][i]), xonly)
+                for i, xonly in zip(test["tweak_indices"], test["is_xonly"])
             ]
+            coor = MuSigCoordinator(pubkeys, tweaks, False)
             for i, pnonce_index in enumerate(test["nonce_indices"]):
                 raw = bytes.fromhex(test_data["pnonces"][pnonce_index])
                 nonce_share = NoncePublicShare.parse(raw)
                 coor.register_nonce_share(pubkeys[i].sec(), nonce_share)
-            agg_nonce = coor.compute_nonce()
-            self.assertEqual(agg_nonce.serialize(), bytes.fromhex(test["aggnonce"]))
-            coor.create_signing_context(msg, tweaks)
+            nonceagg = coor.aggregate_nonce_shares()
+            self.assertEqual(nonceagg.serialize(), bytes.fromhex(test["aggnonce"]))
+            coor.create_signing_context(msg)
             with self.assertRaises(ValueError):
                 for i, psig_index in enumerate(test["psig_indices"]):
                     raw = test_data["psigs"][psig_index]
@@ -974,7 +1060,7 @@ class MuSigTest(TestCase):
                 raw_aggnonce = bytes.fromhex(
                     test_data["aggnonces"][test["aggnonce_index"]]
                 )
-                coor.agg_nonce = AggNonce.parse(raw_aggnonce)
+                coor.nonceagg = NonceAggregator.parse(raw_aggnonce)
                 context = coor.create_signing_context(msg)
                 participant.sign(context)
         for test in test_data["valid_test_cases"]:
@@ -988,8 +1074,8 @@ class MuSigTest(TestCase):
                 raw = bytes.fromhex(test_data["pnonces"][pnonce_index])
                 nonce_share = NoncePublicShare.parse(raw)
                 coor.register_nonce_share(pubkeys[i].sec(), nonce_share)
-            agg_nonce = coor.compute_nonce()
-            self.assertEqual(agg_nonce.serialize(), bytes.fromhex(want_aggnonce))
+            nonceagg = coor.aggregate_nonce_shares()
+            self.assertEqual(nonceagg.serialize(), bytes.fromhex(want_aggnonce))
             context = coor.create_signing_context(msg)
             sig_share = participant.sign(context)
             self.assertEqual(sig_share.hex().upper(), test["expected"])
@@ -1100,9 +1186,7 @@ class MuSigTest(TestCase):
         }
         secret = big_endian_to_int(bytes.fromhex(test_data["sk"]))
         private_key = PrivateKey(secret)
-        k1 = big_endian_to_int(bytes.fromhex(test_data["secnonce"][:64]))
-        k2 = big_endian_to_int(bytes.fromhex(test_data["secnonce"][64:128]))
-        nonce_private_share = NoncePrivateShare(k1, k2, private_key.point)
+        nonce_private_share = NoncePrivateShare.parse(bytes.fromhex(test_data["secnonce"]))
         participant = MuSigParticipant(private_key, nonce_private_share)
         want_pubkey = S256Point.parse(bytes.fromhex(test_data["secnonce"][128:]))
         msg = bytes.fromhex(test_data["msg"])
@@ -1112,19 +1196,18 @@ class MuSigTest(TestCase):
             pubkeys = [S256Point.parse(bytes.fromhex(raw)) for raw in raw_pubkeys]
             signer_pubkey = pubkeys[test["signer_index"]]
             self.assertEqual(signer_pubkey, want_pubkey)
-            coor = MuSigCoordinator(pubkeys, sort=False)
-            raw_tweaks = [test_data["tweaks"][i] for i in test["tweak_indices"]]
             tweaks = [
-                Tweak(bytes.fromhex(raw), xonly)
-                for raw, xonly in zip(raw_tweaks, test["is_xonly"])
+                Tweak(bytes.fromhex(test_data["tweaks"][i]), xonly)
+                for i, xonly in zip(test["tweak_indices"], test["is_xonly"])
             ]
+            coor = MuSigCoordinator(pubkeys, tweaks, False)
             for i, pnonce_index in enumerate(test["nonce_indices"]):
                 raw = bytes.fromhex(test_data["pnonces"][pnonce_index])
                 nonce_share = NoncePublicShare.parse(raw)
                 coor.register_nonce_share(pubkeys[i].sec(), nonce_share)
-            agg_nonce = coor.compute_nonce()
-            self.assertEqual(agg_nonce.serialize(), bytes.fromhex(want_aggnonce))
-            context = coor.create_signing_context(msg, tweaks)
+            nonceagg = coor.aggregate_nonce_shares()
+            self.assertEqual(nonceagg.serialize(), bytes.fromhex(want_aggnonce))
+            context = coor.create_signing_context(msg)
             sig_share = participant.sign(context)
             self.assertEqual(sig_share.hex().upper(), test["expected"])
             coor.register_sig_share(signer_pubkey.sec(), sig_share)
@@ -1133,17 +1216,9 @@ class MuSigTest(TestCase):
             pubkeys = [S256Point.parse(bytes.fromhex(raw)) for raw in raw_pubkeys]
             signer_pubkey = pubkeys[test["signer_index"]]
             self.assertEqual(signer_pubkey, want_pubkey)
-            coor = MuSigCoordinator(pubkeys, sort=False)
-            raw_tweaks = [test_data["tweaks"][i] for i in test["tweak_indices"]]
             tweaks = [
-                Tweak(bytes.fromhex(raw), xonly)
-                for raw, xonly in zip(raw_tweaks, test["is_xonly"])
+                Tweak(bytes.fromhex(test_data["tweaks"][i]), xonly)
+                for i, xonly in zip(test["tweak_indices"], test["is_xonly"])
             ]
-            for i, pnonce_index in enumerate(test["nonce_indices"]):
-                raw = bytes.fromhex(test_data["pnonces"][pnonce_index])
-                nonce_share = NoncePublicShare.parse(raw)
-                coor.register_nonce_share(pubkeys[i].sec(), nonce_share)
-            agg_nonce = coor.compute_nonce()
-            self.assertEqual(agg_nonce.serialize(), bytes.fromhex(want_aggnonce))
             with self.assertRaises(ValueError):
-                coor.create_signing_context(msg, tweaks)
+                coor = MuSigCoordinator(pubkeys, tweaks, False)
