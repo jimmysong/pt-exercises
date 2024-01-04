@@ -139,6 +139,9 @@ class Point:
         else:
             return f"Point({self.x.num},{self.y.num})_{self.x.prime}"
 
+    def __sub__(self, other):
+        return self + -1 * other
+
     def __add__(self, other):
         if self.a != other.a or self.b != other.b:
             raise TypeError(f"Points {self}, {other} are not on the same curve")
@@ -268,8 +271,10 @@ class S256Point(Point):
     def xonly(self):
         """returns the binary version of X-only pubkey"""
         # if x is None, return 32 0 bytes
+        if self.x is None:
+            return b"\x00" * 32
         # otherwise, convert the x coordinate to Big Endian 32 bytes
-        raise NotImplementedError
+        return int_to_big_endian(self.x.num, 32)
 
     def tweak(self, merkle_root=b""):
         """returns the tweak for use in p2tr if there's no script path"""
@@ -353,7 +358,6 @@ class S256Point(Point):
         # verify the message using the self.verify method
         return self.verify(z, sig)
 
-
     def even_point(self):
         # if the point is even, return itself, otherwise, multiply by -1
         if self.even:
@@ -363,24 +367,14 @@ class S256Point(Point):
 
     def verify_schnorr(self, msg, schnorr_sig):
         # get the even point with the even_point method
-        point = self.even_point()
         # if the sig's R is the point at infinity, return False
-        if schnorr_sig.r.x is None:
-            return False
         # commitment is R||P||m use the xonly serializations
-        commitment = schnorr_sig.r.xonly() + point.xonly() + msg
         # h is the hash_challenge of the commitment as a big endian integer
-        h = big_endian_to_int(hash_challenge(commitment))
         # -hP+sG is what we want
-        target = -h * point + schnorr_sig.s * G
         # if the resulting point is the point at infinity return False
-        if target.x is None:
-            return False
         # if the resulting point's y is odd  return False
-        if not target.even:
-            return False
         # check that the target is the same as R
-        return target == schnorr_sig.r
+        raise NotImplementedError
 
     @classmethod
     def parse(cls, binary):
@@ -646,7 +640,10 @@ class PrivateKey:
     def even_secret(self):
         # check if the public point is even
         # return secret if it is, N - secret otherwise
-        raise NotImplementedError
+        if self.point.even:
+            return self.secret
+        else:
+            return N - self.secret
 
     def bip340_k(self, msg, aux=None):
         # k is generated using the aux variable, which can be set
@@ -659,7 +656,7 @@ class PrivateKey:
 
     def sign_schnorr(self, msg, aux=None):
         # e is the secret that generates an even y with the even_secret method
-        # get k using the self.bip340_k method
+        # get the nonce, k, using the self.bip340_k method if in exercise 5, use randint(N) in exercise 4
         # get the resulting R=kG point
         # if R's y coordinate is odd flip the k
             # set k to N - k

@@ -1,0 +1,458 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+    <title>Session 1 - Schnorr Signatures/Key Path Spend</title>
+
+    <link rel="stylesheet" href="../dist/custom.css">
+    <link rel="stylesheet" href="../dist/reset.css">
+    <link rel="stylesheet" href="../dist/reveal.css">
+    <link rel="stylesheet" href="../dist/theme/solarized.css">
+    <link rel="stylesheet" href="../lib/css/zenburn.css">
+
+    <script src="../plugin/highlight/highlight.js"></script>
+
+    <script type="text/javascript" async
+      src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML">
+    </script>
+    <script type="text/x-mathjax-config">
+      MathJax.Hub.Config({
+        "HTML-CSS": {
+          scale: 150
+        }
+      });
+    </script>
+    <!-- Theme used for syntax highlighted code -->
+    <link rel="stylesheet" href="../plugin/highlight/zenburn.css">
+  </head>
+  <body>
+<div class="reveal">
+  <div class="slides">
+<section>
+  <section>
+    <h2>Class Schedule</h2>
+    <ul>
+      <li class="current"><strong>Schnorr Signatures/Key Path Spend</strong>
+      <li><strong>Script Path Spending</strong>
+      <li><strong>MuSig</strong>
+      <li><strong>Frost</strong>
+    </ul>
+  </section>
+  <section>
+    <h2>Session Objectives</h2>
+    <ul>
+      <li class="fragment"><strong>Review ECDSA Signatures</strong>
+      <li class="fragment"><strong>Learn Schnorr Signatures</strong>
+      <li class="fragment"><strong>Learn BIP-340 Nonce-generation</strong>
+      <li class="fragment"><strong>Learn Taproot</strong>
+      <li class="fragment"><strong>Learn Taproot KeyPath Spend</strong>
+    </ul>
+  </section>
+</section>
+<section>
+  <section>
+    <h2>Schnorr Signatures</h2>
+  </section>
+  <section>
+    <h2>Motivation</h2>
+    <ul>
+      <li class="fragment">Conceptually Simpler
+      <li class="fragment">ECDSA uses DER, which is 72-73 bytes, Schnorr uses 64
+      <li class="fragment">Fewer Elliptic Curve Operations (we use custom hashes)
+      <li class="fragment">Key Aggregation/Signature Aggregation/Batch Verification
+    </ul>
+  </section>
+  <section>
+    <h2>ECDSA Signing</h2>
+    <ul>
+      <li class="fragment">$eG=P$, $z$ is hash of what's being signed, choose a nonce $k$
+      <li class="fragment">Compute $kG=R=(x,y)$, let $r=x$
+      <li class="fragment">Compute $s=\frac{z+re}{k}$
+      <li class="fragment">Signature is the pair $(r,s)$
+    </ul>
+  </section>
+  <section>
+    <h2>ECDSA Verification</h2>
+    <ul>
+      <li class="fragment">$eG=P$, $z$ is hash of what's being signed
+      <li class="fragment">Signature is $(r,s)$ where $s=\frac{z+re}{k}$
+      <li class="fragment">Compute $u=\frac{z}{s}, v=\frac{r}{s}$
+      $$uG+vP=\frac{z}{s}G+\frac{r}{s}P=\frac{z}{s}G+\frac{re}{s}G \\ =\frac{z+re}{s}G =\frac{(z+re)k}{z+re}G \\ =kG=R=(r,y)$$
+    </ul>
+  </section>
+  <section>
+    <h2>ECDSA</h2>
+    <ul>
+      <li class="fragment">$u$ is a commitment of $z$, or the message (transaction)
+      <li class="fragment">$v$ is a commitment to $r$, or the target being hit/challenge being responded to
+      <li class="fragment">Kludgy, uses field division, which is expensive computationally
+      <li class="fragment">Minimal Commitments
+      <li class="fragment">Developed after Schnorr and used in Bitcoin due to Patent issues (expired 2008)
+    </ul>
+  </section>
+</section>
+<section>
+  <section>
+    <h2>Schnorr Signatures</h2>
+  </section>
+  <section>
+    <h2>Schnorr vs. ECDSA</h2>
+    <ul>
+      <li class="fragment">Uses a hash function instead of field division
+      <li class="fragment">That hash can commit to everything at once, instead of just one per variable. $H(a||b||c||...)$
+      <li class="fragment">Target is a point on the curve $R$, not just the $x$ coordinate
+      <li class="fragment">Aggregation of keys and signatures now possible!
+      <li class="fragment">Batch verification possible!
+    </ul>
+  </section>
+  <section>
+    <h2>Serialization</h2>
+    <ul>
+      <li class="fragment">$(R,s)$, where $R$ is the pubkey of the target and $s$ is a number
+      <li class="fragment">Serialization is $R$ as $x$-only followed by $s$ in big endian
+      <li class="fragment">$R$ <em>must</em> be even!
+    </ul>
+  </section>
+  <section>
+    <h2>Schnorr Notes</h2>
+    <ul>
+      <li class="fragment">Specified in BIP340
+      <li class="fragment">Nonce-generation ($k$) has a separate, secure process
+      <li class="fragment">We use different tagged hashes throughout
+    </ul>
+  </section>
+  <section>
+    <h2>Schnorr Verification</h2>
+    <ul>
+      <li class="fragment">Public Key: $P$, Message: $z$, Nonce Point: $R$
+      <li class="fragment">$\mathcal{H}$ is a tagged hash "BIP0340/challenge" <code>hash_challenge</code>
+      <li class="fragment">Challenge: $d=\mathcal{H}(R||P||z)$ where $R$ and $P$ are $x$-only
+      <li class="fragment">Signature: $(R,s)$
+      <li class="fragment">Verify $R=sG-dP$
+    </ul>
+  </section>
+  <section>
+    <h2>Example Schnorr Verification</h2>
+    <pre><code data-trim data-noescape class="python">
+from ecc import S256Point, SchnorrSignature, G, N
+from hash import hash_challenge
+from helper import big_endian_to_int
+msg = b"I'm learning Schnorr Signatures!"
+sig_raw = bytes.fromhex("3b5b656f623e314fcff97b44f93d4452992856e65fe0268a77a9a94c626eb1b11e8bcea138a15c185633fd66a7c1683843daa332c9d9e27a7178389d338521ab")
+sig = SchnorrSignature.parse(sig_raw)
+xonly = bytes.fromhex("a8a28557947025fe0646660677c09a757a3bce148d99fac9368439a13df6ea1a")
+p = S256Point.parse(xonly)
+preimage = sig.r.xonly() + p.xonly() + msg
+d = big_endian_to_int(hash_challenge(preimage)) % N
+target = sig.s * G - d * p
+print(target == sig.r)
+    </code></pre>
+  </section>
+  <section>
+    <h2><b>Exercises</b></h2>
+    <ol start="1">
+      <li>Verify a Schnorr Signature
+      <li>Make this test pass: <code>ecc:SchnorrTest:test_verify</code>
+    </ol>
+  </section>
+</section>
+<section>
+  <section>
+    <h2>Schnorr Signing</h2>
+    <ul>
+      <li class="fragment">Private key: $e$, $eG=P$, Message: $z$, Nonce: $k$, $kG=R$
+      <li class="fragment">$\mathcal{H}$ is a tagged hash "BIP0340/challenge" <code>hash_challenge</code>
+      <li class="fragment">Challenge: $d=\mathcal{H}(R||P||z)$ where $R$ and $P$ are $x$-only
+      <li class="fragment">Signature: $(R,s)$ where $s=k + e d$
+      $$sG-dP =(k+e d)G-dP =kG+d(eG)-dP \\ =R+dP-dP=R$$
+    </ul>
+  </section>
+  <section>
+    <h2>Schnorr Signing</h2>
+    <pre><code data-trim data-noescape class="python">
+from ecc import PrivateKey, N, G
+from hash import hash_challenge
+from helper import big_endian_to_int
+priv = PrivateKey(12345)
+e = priv.even_secret()
+msg = b"I'm learning Schnorr Signatures!"
+k = 21016020145315867006318399104346325815084469783631925097217883979013588851039
+r = k * G
+if not r.even:
+    k = N - k
+    r = k * G
+challenge = r.xonly() + priv.point.xonly() + msg
+d = big_endian_to_int(hash_challenge(challenge)) % N
+s = (k + e * d) % N
+sig = SchnorrSignature(r, s)
+if not priv.point.verify_schnorr(msg, sig):
+    raise RuntimeError("Bad Signature")
+print(sig.serialize().hex())
+    </code></pre>
+  </section>
+  <section>
+    <h2><b>Exercises</b></h2>
+    <ol start="3">
+      <li>Sign the message "Schnorr Signatures adopt Taproot" with the private key 21,000,000
+      <li>Make this test pass: <code>ecc:SchnorrTest:test_sign</code>
+    </ol>
+  </section>
+</section>
+<section>
+  <section>
+    <h2>Nonce ($k$) Creation</h2>
+  </section>
+  <section>
+    <h2>Motivation</h2>
+    <ul>
+      <li class="fragment">Revealing the nonce $k$ reveals the private key
+      <li class="fragment">Bad random number generator for $k$ will reveal the private key
+      <li class="fragment">Signing two separate messages with the same $k$ will reveal the private key
+      <li class="fragment">Solution is to use a tagged hash to create $k$
+      <li class="fragment">The preimage of the hash will contain the message, secret and randomness
+    </ul>
+  </section>
+  <section>
+    <h2>Implementation</h2>
+    <ul>
+      <li class="fragment">Start with a random number $a$, which is then hashed
+      <li class="fragment">Xor the result $\mathcal{H_1}(a)$ with the secret $e$
+      <li class="fragment">Then hash with the message $z$ to generate the $k$
+      <li class="fragment">$P=eG$, $\mathcal{H_1}$ is <code>hash_aux</code>, $\mathcal{H_2}$ is <code>hash_nonce</code>
+      <li class="fragment">$x = \mathcal{H_1}(a) \oplus e$, $k=\mathcal{H_2}(x||P||z)$
+      <li class="fragment">$k$ is unique to both the secret and the message
+      <li class="fragment">32 0-bytes $a$ can be used to create a deterministic $k$
+    </ul>
+  </section>
+  <section>
+    <h2>Nonce Creation</h2>
+    <pre><code data-trim data-noescape class="python">
+from ecc import PrivateKey, N
+from hash import sha256, hash_aux, hash_nonce
+from helper import big_endian_to_int, int_to_big_endian, xor_bytes
+aux = bytes([0] * 32)
+private_key = PrivateKey(21000000)
+p = private_key.point
+e = private_key.even_secret()
+msg = sha256(b"Nonce generation is spectacular!")
+x = xor_bytes(int_to_big_endian(e, 32), hash_aux(aux))
+k = big_endian_to_int(hash_nonce(x + p.xonly() + msg)) % N
+print(hex(k))
+</code></pre>
+  </section>
+  <section>
+    <h2><b>Exercises</b></h2>
+    <ol start="5">
+      <li>Sign the message "Secure Deterministic Nonce made!" with the private key 21,000,000
+      <li>Make this test pass: <code>ecc:SchnorrTest:test_bip340_k</code>
+    </ol>
+  </section>
+</section>
+<section>
+  <section>
+    <h2>Batch Verification</h2>
+    <ul>
+      <li class="fragment">Pubkeys are $P_i$, Signatures are $(R_i,s_i)$
+      <li class="fragment">Challenges are $d_i=\mathcal{H}(R_i||P_i||z_i)$
+      <li class="fragment">$R_i=s_iG-d_iP_i$
+      <li class="fragment">$\sum{R_i}=\sum{s_iG}-\sum{d_iP_i}$
+      <li class="fragment">$(\sum{s_i})G=\sum{R_i}+\sum{d_iP_i}$
+      <li class="fragment">Fewer total operations!
+    </ul>
+  </section>
+  <section>
+    <h2>Exercises</h2>
+    <ol start="7">
+      <li>Batch Verify two Schnorr Signatures
+    </ol>
+  </section>
+</section>
+<section>
+  <section>
+    <h2>Taproot Key Path Spend</h2>
+  </section>
+  <section>
+    <h2>What is Taproot?</h2>
+    <ul>
+      <li class="fragment">Defined in BIP341
+      <li class="fragment">Segwit v1, triggered by 32-bytes and a 1 in script
+      <li class="fragment">Every address can bo spent both as a single-signature or as an arbitrary script
+      <li class="fragment">Adds privacy through only revealing the single spending condition
+      <li class="fragment">Adds Schnorr Signatures
+    </ul>
+  </section>
+  <section>
+    <h2>Taproot Structure</h2>
+    <ul>
+      <li class="fragment">Has two ways to spend
+      <li class="fragment">KeyPath spend is like p2pkh or p2wpkh, which means it can be unlocked by a single signature
+      <li class="fragment">ScriptPath spend is like p2sh or p2wsh, which means it can be an arbitrary script (like multisig)
+    </ul>
+  </section>
+  <section>
+    <h2>Taproot Structure</h2>
+    <div class="tree">
+      <ul>
+        <li>
+          <div class="blue">External PubKey $Q$</div>
+          <ul>
+            <li>
+              <div class="green"><strong style="color:red"> Internal PubKey $P$ </strong></div>
+            </li>
+            <li>
+              <div class="brown">Merkle Root $m$</div>
+                <ul>
+                  <li>
+                    <div class="brown">TapBranch</div>
+                    <ul>
+                      <li>
+                        <div class="brown">TapLeaf</div>
+                        <ul>
+                          <li>
+                            <div class="brown">TapScript</div>
+                          </li>
+                        </ul>
+                      </li>
+                      <li>
+                        <div class="brown">TapLeaf</div>
+                        <ul>
+                          <li>
+                            <div class="brown">TapScript</div>
+                          </li>
+                        </ul>
+                      </li>
+                    </ul>
+                  </li>
+                  <li>
+                    <div class="brown">TapLeaf</div>
+                    <ul>
+                      <li>
+                        <div class="brown">TapScript</div>
+                      </li>
+                    </ul>
+                  </li>
+                </ul>
+            </li>
+          </ul>
+        </li>
+      </ul>
+    </div>
+  </section>
+  <section>
+    <h2>Taproot Architecture</h2>
+    <ul>
+      <li class="fragment">KeyPath Spend (single-key like p2pkh and p2wpkh)
+      <li class="fragment">ScriptPath Spend (arbitrary script like p2sh and p2wsh)
+      <li class="fragment">ScriptPath is a Merkle Tree of TapScripts
+      <li class="fragment">TapScripts are like Script, but with slightly different OP codes (defined in BIP342)
+    </ul>
+  </section>
+  <section>
+    <h2>Taproot Implementation</h2>
+    <ul>
+      <li class="fragment">Segwit version 1
+      <li class="fragment">Requires <code>OP_1</code> and 32 bytes
+      <li class="fragment">The 32 bytes are an $x$-only public key $Q$ (external public key)
+      <li class="fragment">This means $Q$ is <em>always</em> even!
+      <li class="fragment">KeyPath spend's public key is $P$ (internal public key)
+      <li class="fragment">The Merkle Root $m$ of the ScriptPath Spend combined with $P$ generates the tweak ($t$)
+      <li class="fragment">That tweak is used to generate the external public key $Q=P+tG$
+    </ul>
+  </section>
+  <section>
+    <h2>Spending from the KeyPath</h2>
+    <ul>
+      <li class="fragment">$m$ is the Merkle Root of the ScriptPath
+      <li class="fragment">Tweak $t$ and $P$ create $Q$, the external pubkey
+      <li class="fragment">$t=\mathcal{H}(P||m)$ where $\mathcal{H}$ is <code>hash_taptweak</code>
+      <li class="fragment">$Q=P+tG$, and $eG=P$ which means $Q=eG+tG$ and $Q=(e+t)G$
+      <li class="fragment">$e+t$ is your private key, whose public key is $Q$
+      <li class="fragment">Witness has a single element, the Schnorr Signature
+      <li class="fragment">If you don't want a script path, $m$ is the empty string
+    </ul>
+  </section>
+  <section>
+    <h2>Key Path UTXO Example</h2>
+    <pre><code data-trim data-noescape class="python">
+# Example UTXO creation for a p2tr with no script path
+from ecc import S256Point, G
+from hash import hash_taptweak
+from helper import big_endian_to_int
+from script import P2TRScriptPubKey
+internal_pubkey_raw = bytes.fromhex("cbaa648dbfe734646ce958e2f14a874149fae4010fdeabde4bae6a732537fd91")
+p = S256Point.parse(internal_pubkey_raw)
+m = b""
+t = big_endian_to_int(hash_taptweak(p.xonly() + m))
+q = p + t * G
+script_pubkey = P2TRScriptPubKey(q)
+print(script_pubkey)
+    </code></pre>
+  </section>
+  <section>
+    <h2>Exercises</h2>
+    <ol start="8">
+      <li>Make a P2TR ScriptPubKey with no Script Path using the private key 9284736473
+      <li>Make this test pass: <code>ecc:TapRootTest:test_default_tweak</code>
+      <li>Make this test pass: <code>ecc:TapRootTest:test_tweaked_key</code>
+      <li>Make this test pass: <code>ecc:TapRootTest:test_p2tr_script</code>
+    </ol>
+  </section>
+</section>
+<section>
+  <section>
+    <h2>P2TR Addresses</h2>
+  </section>
+  <section>
+    <h2>P2TR Addresses</h2>
+    <ul>
+      <li class="fragment">Segwit v0 uses Bech32
+      <li class="fragment">Taproot (Segwit v1) uses Bech32m
+      <li class="fragment">Bech32m is different than Bech32 (BIP350)
+      <li class="fragment">Has error correcting capability and uses 32 letters/numbers
+      <li class="fragment">Segwit v0 addresses start with <code>bc1q</code> and p2wpkh is shorter than p2wsh
+      <li class="fragment">Segwit v1 addresses start with <code>bc1p</code> and they're all one length
+    </ul>
+  </section>
+  <section>
+    <h2>P2TR Address Example</h2>
+    <pre><code data-trim data-noescape class="python">
+# Example of getting a p2tr address
+from ecc import S256Point
+internal_pubkey_raw = bytes.fromhex("cbaa648dbfe734646ce958e2f14a874149fae4010fdeabde4bae6a732537fd91")
+p = S256Point.parse(internal_pubkey_raw)
+print(p.p2tr_address())
+print(p.p2tr_address(network="signet"))
+    </pre></code>
+  </section>
+  <section>
+    <h2>Exercise</h2>
+    <ol start="12">
+      <li>Make this test pass: <code>ecc:TapRootTest:test_private_tweaked_key</code>
+      <li>Make your own Signet P2TR Address! Add your address at <a href="https://docs.google.com/spreadsheets/d/1BHqFAzgfThrf64q9pCinwTd7FitJrL5Is3HHBR3UyeI/edit?usp=sharing">on this spreadsheet</a>
+    </ol>
+  </section>
+</section>
+</div>
+</div>
+<script src="../dist/reveal.js"></script>
+<script src="../plugin/notes/notes.js"></script>
+<script src="../plugin/markdown/markdown.js"></script>
+<script src="../plugin/highlight/highlight.js"></script>
+<script src="../plugin/math/math.js"></script>
+<script>
+  // More info about initialization & config:
+  // - https://revealjs.com/initialization/
+  // - https://revealjs.com/config/
+  Reveal.initialize({
+      hash: true,
+      plugins: [ RevealMarkdown, RevealHighlight, RevealNotes, RevealMath ]
+  });
+  MathJax.Hub.Config({
+      jax: ["input/TeX","output/HTML-CSS"],
+      displayAlign: "left"
+  });
+</script>
+</body>
+</html>

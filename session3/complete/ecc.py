@@ -139,6 +139,9 @@ class Point:
         else:
             return f"Point({self.x.num},{self.y.num})_{self.x.prime}"
 
+    def __sub__(self, other):
+        return self + -1 * other
+
     def __add__(self, other):
         if self.a != other.a or self.b != other.b:
             raise TypeError(f"Points {self}, {other} are not on the same curve")
@@ -387,8 +390,8 @@ class S256Point(Point):
         commitment = schnorr_sig.r.xonly() + point.xonly() + msg
         # h is the hash_challenge of the commitment as a big endian integer
         h = big_endian_to_int(hash_challenge(commitment))
-        # target is -hP+sG
-        target = -h * point + schnorr_sig.s * G
+        # target is sG-hP
+        target = schnorr_sig.s * G - h * point
         # if the resulting point is the point at infinity return False
         if target.x is None:
             return False
@@ -694,11 +697,11 @@ class PrivateKey:
     def sign_schnorr(self, msg, aux=None):
         # e is the secret that generates an even y with the even_secret method
         e = self.even_secret()
-        # get k using the self.bip340_k method
+        # get the nonce, k, using the self.bip340_k method if in exercise 5, use randint(N) in exercise 4
         k = self.bip340_k(msg, aux)
         # get the resulting R=kG point
         r = k * G
-        # if R's y coordinate is odd, flip the k
+        # if R is odd, flip the k
         if not r.even:
             # set k to N - k
             k = N - k

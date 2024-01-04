@@ -2,7 +2,7 @@ import sys
 
 sessions = [int(a) for a in sys.argv[1:]]
 if len(sessions) == 0:
-    sessions = range(5)
+    sessions = range(4)
 
 
 def chop_word(s):
@@ -11,10 +11,10 @@ def chop_word(s):
         if letter not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_":
             return s[:i]
 
-to_clear = {}
-files_methods = {}
-files_functions = {}
 for session_number in sessions:
+    to_clear = {}
+    files_methods = {}
+    files_functions = {}
     session = f"session{session_number}"
     with open(f"{session}/complete/answers.py", "r") as file:
         parse = False
@@ -52,6 +52,7 @@ for session_number in sessions:
                     current_func = chop_word(line.lstrip()[4:])
                     key = f"{filename}.{current_func}"
                     if to_clear.get(key):
+                        del to_clear[key]
                         active = True
         with open(f"{session}/{filename}.py", "w") as file:
             file.write(modified_file)
@@ -81,6 +82,8 @@ for session_number in sessions:
                     current_func = chop_word(line.lstrip()[4:])
                     key = f"{filename}.{current_class}.{current_func}"
                     if to_clear.get(key):
+                        del to_clear[key]
                         active = True
         with open(f"{session}/{filename}.py", "w") as file:
             file.write(modified_file)
+    print(to_clear)

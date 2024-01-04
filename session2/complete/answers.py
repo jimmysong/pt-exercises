@@ -37,7 +37,7 @@ True
 
 #endcode
 #unittest
-ecc:PrivateKeyTest:test_tweaked_key:
+ecc:TapRootTest:test_tweaked_key:
 #endunittest
 #exercise
 
@@ -143,17 +143,14 @@ True
 >>> tap_script = TapScript([pubkey_a, 0xAC])
 >>> print(tap_script)
 331a8f6a14e1b41a6b523ddb505fbc0662a6446bd42408692497297d3474aeec OP_CHECKSIG
-
 >>> # 2-of-2 (0xAD is OP_CHECKSIGVERIFY)
 >>> tap_script = TapScript([pubkey_a, 0xAD, pubkey_b, 0xAC])
 >>> print(tap_script)
 331a8f6a14e1b41a6b523ddb505fbc0662a6446bd42408692497297d3474aeec OP_CHECKSIGVERIFY 158a49d62c384c539a453e41a70214cfb85184954ae5c8df4b47eb74d58ff16f OP_CHECKSIG
-
 >>> # 2-of-3 (0xBA is OP_CHECKSIGADD, 0x52 is OP_2, 0x87 is OP_EQUAL)
 >>> tap_script = TapScript([pubkey_a, 0xAC, pubkey_b, 0xBA, pubkey_c, 0xBA, 0x52, 0x87])
 >>> print(tap_script)
 331a8f6a14e1b41a6b523ddb505fbc0662a6446bd42408692497297d3474aeec OP_CHECKSIG 158a49d62c384c539a453e41a70214cfb85184954ae5c8df4b47eb74d58ff16f OP_CHECKSIGADD 582662e8e47df59489d6756615aa3db3fa3bbaa75a424b9c78036265858f5544 OP_CHECKSIGADD OP_2 OP_EQUAL
-
 >>> # halvening timelock 1-of-1 (0xB1 is OP_CLTV, 0x75 is OP_DROP)
 >>> tap_script = TapScript([encode_minimal_num(840000), 0xB1, 0x75, pubkey_a, 0xAC])
 >>> print(tap_script)
@@ -180,9 +177,9 @@ Make a TapScript for 4-of-4 using pubkeys from private keys which correspond to 
 #endexercise
 #markdown
 # TapLeaf
-* These are the leaves of the Merkle Tree
-* Has a TapLeaf Version (<code>0xc0</code>) and TapScript
-* Any Leaf can be executed to satisfy the Taproot Script Path
+* Leaves of the Merkle Tree which contain TapScripts
+* Contains TapLeaf Version (<code>0xc0</code>) and TapScript
+* Any Leaf can successfully execute its TapScript to spend using the Taproot Script Path
 * Hash of a TapLeaf is a Tagged Hash (TapLeaf) of the version + TapScript
 #endmarkdown
 #code
@@ -229,10 +226,11 @@ taproot:TapRootTest:test_tapleaf_hash:
 #endunittest
 #markdown
 # TapBranch
-* These are the branches of the Merkle Tree
-* These connect a left child and a right child.
+* Branches of the Merkle Tree
+* Contains a left child and a right child.
 * Each child is a TapLeaf or TapBranch
 * Hash of a TapBranch is a Tagged Hash (TapBranch) of the left hash and right hash, sorted
+* Sorting makes verification of the merkle root much easier
 #endmarkdown
 #code
 >>> # Example of making a TapBranch and calculating the hash
@@ -298,10 +296,11 @@ taproot:TapRootTest:test_tapbranch_hash:
 #endunittest
 #markdown
 # Computing the Merkle Root
-* The Merkle Root is the hash of the root element of the Merkle Tree
-* For TapLeaf: TapLeafHash(version + TapScript serialization)
-* For TapBranch: TapBranchHash(sorted(left, right))
-* It doesn't have to be the hash of anything, just has to be 32 bytes
+* Merkle Root is the hash of the root element of the Merkle Tree which may be TapLeaf, TapBranch or nothing
+* TapLeaf Hash is hash_tapleaf(version + TapScript serialization)
+* TapBranch Hash is hash_tapbranch(sorted(left, right))
+* It doesn't have to be a hash of anything, just any 32 bytes
+* Means addresses can be changed at will
 #endmarkdown
 #code
 >>> # Example of Comupting the Merkle Root
@@ -361,56 +360,57 @@ Calculate the External PubKey for a Taproot output whose internal pubkey is 9090
 
 #endexercise
 #markdown
-# Control Block
-* Required for spending a TapScript, last element of Witness
-* TapScript Version (<code>0xc0</code> or <code>0xc1</code>)
-* The last bit expresses the parity of the external pubkey, which is necessary for batch verification
-* Internal PubKey $P$
-* Merkle Proof (list of hashes to combine to get to the Merkle Root)
+# Control Block Serialization
+* Start with TapScript Version (<code>0xc0</code> or <code>0xc1</code>)
+* The last bit of the TapScript Version expresses the parity of the external pubkey, which is necessary for batch verification
+* $x$-only serialization of the Internal PubKey $P$ (32 bytes)
+* Merkle Proof as a list of 32-byte hashes
 #endmarkdown
 #markdown
 # Merkle Proof
-* List of hashes
-* Combine each with the hash of the TapScript, sorting them each time
-* The result is the Merkle Root $m$, which is combined with the Internal PubKey $P$ to get the tweak $t$ with the formula $t=H_{taptweak}(P+m)$
-* If the result of $P+tG=Q$ where $Q$ is the External PubKey from the UTXO, this is a valid TapScript
+* Hash the TapScript version and the TapScript to get the TapLeaf's hash
+* Hash the TapLeaf hash and the first Merkle Proof hash sorted
+* Hash the current hash and the next Merkle Proof hash sorted, until there are no hashes left
+* The result is the Merkle Root $m$. Then compute the tweak: $t=\mathcal{H(P||m)$ where $\mathcal{H}$ is <code>hash_taptweak</code>
+* Internal Public Key $P$ is used to compute external public key $Q=P+tG$. If Q matches the UTXO, TapScript is valid.
+* Verify the other elements of Witness satisfy the TapScript
 #endmarkdown
 #code
 >>> # Example of Control Block Validation
 >>> from ecc import PrivateKey, S256Point
 >>> from hash import hash_tapbranch
->>> from helper import int_to_byte
 >>> from taproot import TapScript, TapLeaf, TapBranch
->>> external_pubkey_xonly = bytes.fromhex("cbe433288ae1eede1f24818f08046d4e647fef808cfbbffc7d10f24a698eecfd")
+>>> q_xonly = bytes.fromhex("cbe433288ae1eede1f24818f08046d4e647fef808cfbbffc7d10f24a698eecfd")
 >>> pubkey_2 = bytes.fromhex("027aa71d9cdb31cd8fe037a6f441e624fe478a2deece7affa840312b14e971a4")
 >>> tap_script_2 = TapScript([pubkey_2, 0xAC])
 >>> tap_leaf_2 = TapLeaf(tap_script_2)
 >>> tap_leaf_1_hash = bytes.fromhex("76f5c1cdfc8b07dc8edca5bef2b4991201c5a0e18b1dbbcfe00ef2295b8f6dff")
 >>> tap_leaf_3_hash = bytes.fromhex("5dd270ec91aa5644d907059400edfd98e307a6f1c6fe3a2d1d4550674ff6bc6e")
->>> internal_pubkey = S256Point.parse(bytes.fromhex("407910a4cfa5fe195ad4844b6069489fcb429f27dff811c65e99f7d776e943e5"))
+>>> p = S256Point.parse(bytes.fromhex("407910a4cfa5fe195ad4844b6069489fcb429f27dff811c65e99f7d776e943e5"))
 >>> current = tap_leaf_2.hash()
 >>> for h in (tap_leaf_1_hash, tap_leaf_3_hash):
 ...     if h < current:
 ...         current = hash_tapbranch(h + current)
 ...     else:
 ...         current = hash_tapbranch(current + h)
->>> print(internal_pubkey.tweaked_key(current).xonly() == external_pubkey_xonly)
+>>> m = current
+>>> q = p.tweaked_key(m)
+>>> print(q.xonly() == q_xonly)
 True
-
->>> print(internal_pubkey.p2tr_address(current, network="signet"))
+>>> print(p.p2tr_address(m, network="signet"))
 tb1pe0jrx2y2u8hdu8eysx8ssprdfej8lmuq3namllrazrey56vwan7s5j2wr8
 
 #endcode
 #exercise
 
-Validate the Control Block for the pubkey whose private key is 40404 for the external pubkey from the last exercise
+Verify the Control Block for the pubkey whose private key is 40404 for the external pubkey from the last exercise
 
 ----
 >>> from ecc import PrivateKey, S256Point
 >>> from helper import big_endian_to_int
 >>> from taproot import TapScript, TapLeaf, TapBranch
->>> external_pubkey_xonly = bytes.fromhex("8b9f09cd4a33e62b0c9d086056bbdeb7a218c1e4830291b9be56841b31d94ccb")
->>> internal_pubkey = PrivateKey(90909).point
+>>> q_xonly = bytes.fromhex("8b9f09cd4a33e62b0c9d086056bbdeb7a218c1e4830291b9be56841b31d94ccb")
+>>> p = PrivateKey(90909).point
 >>> hash_1 = bytes.fromhex("22cac0b60bc7344152a8736425efd62532ee4d83e3de473ed82a64383b4e1208")
 >>> hash_2 = bytes.fromhex("a41d343d7419b99bfe8e66752fc3c45fd14aa2cc5ef5bf9073ed28dfc60e2e34")
 >>> pubkey_4 = bytes.fromhex("9e5f5a5c29d33c32185a3dc0a9ccb3e72743744dd869dd40b6265a23fd84a402")
@@ -426,10 +426,12 @@ Validate the Control Block for the pubkey whose private key is 40404 for the ext
 ...         current = hash_tapbranch(h + current)  #/
 ...     else:  #/
 ...         current = hash_tapbranch(current + h)  #/
->>> # get the external pubkey is the internal pubkey's tweaked_key method with the current hash
->>> external_pubkey = internal_pubkey.tweaked_key(current)  #/
+>>> # set the merkle root m to be the current hash
+>>> m = current  #/
+>>> # q is p tweaked with m
+>>> q = p.tweaked_key(m)  #/
 >>> # check to see if the external pubkey's xonly is correct
->>> print(external_pubkey.xonly() == external_pubkey_xonly)  #/
+>>> print(q.xonly() == q_xonly)  #/
 True
 
 #endexercise
@@ -473,6 +475,7 @@ Create a Signet P2TR address with these Script Spend conditions:
 >>> tap_branch_2 = TapBranch(tap_branch_1, tap_leaf_3)  #/
 >>> # get the hash of this branch, this is the Merkle Root
 >>> merkle_root = tap_branch_2.hash()  #/
+>>> print(merkle_root.hex())
 >>> # print the address using the p2tr_address method of internal_pubkey and specify signet
 >>> print(internal_pubkey.p2tr_address(merkle_root, network="signet"))  #/
 tb1pxh7kypwsvxnat0z6588pufhx43r2fnqjyn846qj5kx8mgqcamvjsyn5cjg

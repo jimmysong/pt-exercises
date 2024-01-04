@@ -139,6 +139,9 @@ class Point:
         else:
             return f"Point({self.x.num},{self.y.num})_{self.x.prime}"
 
+    def __sub__(self, other):
+        return self + -1 * other
+
     def __add__(self, other):
         if self.a != other.a or self.b != other.b:
             raise TypeError(f"Points {self}, {other} are not on the same curve")
@@ -225,10 +228,13 @@ class S256Point(Point):
         else:
             super().__init__(x=x, y=y, a=a, b=b)
         if x is None:
+            self.even = True
             return
         self.even = self.y.num % 2 == 0
 
     def __eq__(self, other):
+        if other is None:
+            return False
         return self.x == other.x and self.y == other.y
 
     def __repr__(self):
@@ -254,6 +260,11 @@ class S256Point(Point):
         # if compressed, starts with b'\x02' if self.y.num is even, b'\x03' if self.y is odd
         # then self.x.num
         # remember, you have to convert self.x.num/self.y.num to binary using int_to_big_endian
+        if self.x is None:
+            if compressed:
+                return bytes([0] * 33)
+            else:
+                return bytes([0] * 65)
         x = int_to_big_endian(self.x.num, 32)
         if compressed:
             if self.even:
@@ -267,9 +278,9 @@ class S256Point(Point):
 
     def xonly(self):
         """returns the binary version of X-only pubkey"""
-        # if x is None, return 32 0 bytes
+        # if x is None, it's the point at infinity
         if self.x is None:
-            return b"\x00" * 32
+            return G.xonly()  # per MuSig2 testing
         # otherwise, convert the x coordinate to Big Endian 32 bytes
         return int_to_big_endian(self.x.num, 32)
 
@@ -280,8 +291,8 @@ class S256Point(Point):
         return tweak
 
     def tweaked_key(self, merkle_root=b""):
-        """Creates the tweaked external key for a particular tweak."""
-        # Get the tweak with the merkle root
+        """Creates the tweaked external key for a merkle root"""
+        # Get the tweak for the merkle root
         tweak = self.tweak(merkle_root)
         # t is the tweak interpreted as a big endian integer
         t = big_endian_to_int(tweak)
@@ -379,12 +390,12 @@ class S256Point(Point):
         commitment = schnorr_sig.r.xonly() + point.xonly() + msg
         # h is the hash_challenge of the commitment as a big endian integer
         h = big_endian_to_int(hash_challenge(commitment))
-        # -hP+sG is what we want
-        target = -h * point + schnorr_sig.s * G
+        # target is sG-hP
+        target = schnorr_sig.s * G - h * point
         # if the resulting point is the point at infinity return False
         if target.x is None:
             return False
-        # if the resulting point's y is odd  return False
+        # if the resulting point is odd return False
         if not target.even:
             return False
         # check that the target is the same as R
@@ -407,6 +418,11 @@ class S256Point(Point):
             x = int(sec_bin[1:33].hex(), 16)
             y = int(sec_bin[33:65].hex(), 16)
             return cls(x=x, y=y)
+        if sec_bin[0] == 0:
+            if sec_bin == bytes([0] * 33):
+                return cls(None, None)
+            else:
+                raise ValueError(f"{sec_bin} is not in SEC format")
         is_even = sec_bin[0] == 2
         x = S256Field(int(sec_bin[1:].hex(), 16))
         # right side of the equation y^2 = x^3 + 7
@@ -438,14 +454,16 @@ class S256Point(Point):
         y_squared = x**3 + S256Field(B)
         # use the sqrt() method on y_squared to get a possible y
         y = y_squared.sqrt()
-        # flip the y to its complement (P - y.num) if it's odd
-        if y.num % 2 == 1:
-            y = S256Field(P - y.num)
-        # return the point defined by x and y
-        return cls(x, y)
+        # create the point
+        point = cls(x, y)
+        # if the point is odd, multiply by -1
+        if point.even:
+            return point
+        else:
+            return -1 * point
 
     @classmethod
-    def combine(cls, points):
+    def sum(cls, points):
         sum_point = points[0]
         for point in points[1:]:
             sum_point += point
@@ -679,11 +697,11 @@ class PrivateKey:
     def sign_schnorr(self, msg, aux=None):
         # e is the secret that generates an even y with the even_secret method
         e = self.even_secret()
-        # get k using the self.bip340_k method
+        # get the nonce, k, using the self.bip340_k method if in exercise 5, use randint(N) in exercise 4
         k = self.bip340_k(msg, aux)
         # get the resulting R=kG point
         r = k * G
-        # if R's y coordinate is odd flip the k
+        # if R is odd, flip the k
         if not r.even:
             # set k to N - k
             k = N - k

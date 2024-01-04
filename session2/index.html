@@ -1,0 +1,935 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+    <title>Session 2 - Script Path Spending</title>
+
+    <link rel="stylesheet" href="../dist/custom.css">
+    <link rel="stylesheet" href="../dist/reset.css">
+    <link rel="stylesheet" href="../dist/reveal.css">
+    <link rel="stylesheet" href="../dist/theme/solarized.css">
+    <link rel="stylesheet" href="../lib/css/zenburn.css">
+
+    <script src="../plugin/highlight/highlight.js"></script>
+
+    <script type="text/javascript" async
+      src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/MathJax.js?config=TeX-MML-AM_CHTML">
+    </script>
+    <script type="text/x-mathjax-config">
+      MathJax.Hub.Config({
+        "HTML-CSS": {
+          scale: 150
+        }
+      });
+    </script>
+    <!-- Theme used for syntax highlighted code -->
+    <link rel="stylesheet" href="../plugin/highlight/zenburn.css">
+  </head>
+  <body>
+<div class="reveal">
+  <div class="slides">
+<section>
+  <section>
+    <h2>Class Schedule</h2>
+    <ul>
+      <li><strong>Schnorr Signatures/Key Path Spend</strong>
+      <li class="current"><strong>Script Path Spending</strong>
+      <li><strong>MuSig</strong>
+      <li><strong>Frost</strong>
+    </ul>
+  </section>
+  <section>
+    <h2>Session Objectives</h2>
+    <ul>
+      <li class="fragment"><strong>Create a p2tr Key Path Spending Transaction</strong>
+      <li class="fragment"><strong>Learn How TapScript Works</strong>
+      <li class="fragment"><strong>TapLeaf and TapBranch Hashing and Merkle Root Creation</strong>
+      <li class="fragment"><strong>Merkle Proofs/Control Blocks </strong>
+      <li class="fragment"><strong>Make a p2tr Address that will be spent using ScriptPath</strong>
+    </ul>
+  </section>
+</section>
+<section>
+  <section>
+    <h2>P2TR KeyPath Spending</h2>
+  </section>
+  <section>
+    <div class="tree">
+      <ul>
+        <li>
+          <div class="blue">External PubKey $Q$</div>
+          <ul>
+            <li>
+              <div class="green"><strong style="color:red"> Internal PubKey $P$ </strong></div>
+            </li>
+            <li>
+              <div class="brown">Merkle Root $m$</div>
+                <ul>
+                  <li>
+                    <div class="brown">TapBranch</div>
+                    <ul>
+                      <li>
+                        <div class="brown">TapLeaf</div>
+                        <ul>
+                          <li>
+                            <div class="brown">TapScript</div>
+                          </li>
+                        </ul>
+                      </li>
+                      <li>
+                        <div class="brown">TapLeaf</div>
+                        <ul>
+                          <li>
+                            <div class="brown">TapScript</div>
+                          </li>
+                        </ul>
+                      </li>
+                    </ul>
+                  </li>
+                  <li>
+                    <div class="brown">TapLeaf</div>
+                    <ul>
+                      <li>
+                        <div class="brown">TapScript</div>
+                      </li>
+                    </ul>
+                  </li>
+                </ul>
+            </li>
+          </ul>
+        </li>
+      </ul>
+    </div>
+  </section>
+  <section>
+    <h2>Spending P2TR UTXO</h2>
+    <ul>
+      <li class="fragment">We can't just sign with the private key $e$, but also need the tweak $t$
+      <li class="fragment">External pubkey $Q$ is in the UTXO as an $x$-only pubkey
+      <li class="fragment">Because it's $x$-only, $Q$ is even, even if the $P+tG$ is odd
+      <li class="fragment">To spend from the UTXO, we need to handle the tweak and possibly Q being odd
+      <li class="fragment">We put the Schnorr Signature in the Witness field to spend it
+    </ul>
+  </section>
+  <section>
+    <h2>Spending Plan</h2>
+    <ul>
+      <li class="fragment">We have 20,000 sats in this output:
+        <ul>
+          <li class="fragment"><code>871864...66995:0</code>
+        </ul>
+      <li class="fragment">We want to spend all of it to:
+        <ul>
+          <li><code>tb1ptaqplrhn...quchufq</code>
+        </ul>
+      <li class="fragment">1 input/1 output transaction
+    </ul>
+  </section>
+  <section>
+    <h2>Spending Example</h2>
+    <pre><code data-trim data-noescape class="python">
+# Spending from a p2tr
+from ecc import PrivateKey, N
+from hash import sha256
+from helper import big_endian_to_int
+from script import address_to_script_pubkey
+from tx import Tx, TxIn, TxOut
+my_email = b"jimmy@programmingblockchain.com"
+my_secret = big_endian_to_int(sha256(my_email))
+priv = PrivateKey(my_secret)
+prev_tx = bytes.fromhex("871864d7631024465fc210e553fa9f50e7f0f2359288ad121aa733d65e366995")
+prev_index = 0
+target_address = "tb1ptaqplrhnyh3kq85n7dtm5vcpgstt0ev80f4wd8ngeppch4fzu8mquchufq"
+fee = 500
+tx_in = TxIn(prev_tx, prev_index)
+target_script_pubkey = address_to_script_pubkey(target_address)
+target_amount = tx_in.value(network="signet") - fee
+tx_out = TxOut(target_amount, target_script_pubkey)
+tx_obj = Tx(1, [tx_in], [tx_out], network="signet", segwit=True)
+tweaked_secret = (priv.secret + big_endian_to_int(priv.point.tweak())) % N
+tweaked_key = PrivateKey(tweaked_secret)
+tx_obj.sign_p2tr_keypath(0, tweaked_key)
+print(tx_obj.serialize().hex())
+    </code></pre>
+  </section>
+  <section>
+    <h2>Exercises</h2>
+    <ol start="1">
+      <li> Spend from your P2TR Address. You have been sent 100,000 sats to your address on Signet. Send 40,000 sats back to <code>tb1q7kn55vf3mmd40gyj46r245lw87dc6us5n50lrg</code>, the rest to yourself. Use <a href="https://mempool.space/signet/tx/push" target="_mempool">Mempool Signet</a> to broadcast your transaction
+    </ol>
+  </section>
+</section>
+<section>
+  <section>
+    <h2>TapScript</h2>
+  </section>
+  <section>
+    <h2>Taproot Structure</h2>
+    <div class="tree">
+      <ul>
+        <li>
+          <div class="blue">External PubKey $Q$</div>
+          <ul>
+            <li>
+              <div class="green">Internal PubKey $P$</div>
+            </li>
+            <li>
+              <div class="brown">Merkle Root $m$</div>
+                <ul>
+                  <li>
+                    <div class="brown">TapBranch</div>
+                    <ul>
+                      <li>
+                        <div class="brown">TapLeaf</div>
+                        <ul>
+                          <li>
+                            <div class="brown"><strong style="color:red"> TapScript </strong></div>
+                          </li>
+                        </ul>
+                      </li>
+                      <li>
+                        <div class="brown">TapLeaf</div>
+                        <ul>
+                          <li>
+                            <div class="brown">TapScript</div>
+                          </li>
+                        </ul>
+                      </li>
+                    </ul>
+                  </li>
+                  <li>
+                    <div class="brown">TapLeaf</div>
+                    <ul>
+                      <li>
+                        <div class="brown">TapScript</div>
+                      </li>
+                    </ul>
+                  </li>
+                </ul>
+            </li>
+          </ul>
+        </li>
+      </ul>
+    </div>
+  </section>
+  <section>
+    <h2>What is TapScript?</h2>
+    <ul>
+      <li class="fragment">Same as Script except for a few New/Changed OP Codes defined in BIP342
+      <li class="fragment"><code>OP_CHECKSIG</code> and <code>OP_CHECKSIGVERIFY</code> use Schnorr Signatures
+      <li class="fragment"><code>OP_CHECKMULTISIG</code> and <code>OP_CHECKMULTISIGVERIFY</code> are disabled
+      <li class="fragment"><code>OP_CHECKSIGADD</code> is added to replace multisig
+    </ul>
+  </section>
+  <section>
+    <h3>Pay-to-TapRoot Spending TX</h3>
+    <div class="medhex"><code class="brown">01000000</code><strong><code class="light-blue">0001</code></strong><code class="red">01</code><code class="blue">376afebcc53dd694c99c5674846909881f790145948cb820b1f61f8948630925</code><code class="magenta">00000000</code><code class="yellow">00</code><code class="purple">ffffffff</code><code class="red">02</code><code class="green">409c000000000000</code><code class="dark-orange">160014f5a74a3131dedb57a092ae86aad3ee3f9b8d7214</code><code class="green">6ce8000000000000</code><code class="dark-orange">2251204994481c22c21fb6f1362b154b86ec3d04890594b127ae658dda76c6c1cfcf5e</code><code class="cyan">014002de2a8a88783937f10742235dfdf6a0f9526f4e8eee9d3d4cd11d5813269a0d1b56b5028b81735dae9d3dd9b9f2fe2193474dba0569cff087c2575f0f8f5b5f</code><code class="dark-red">00000000</code>
+      <div class="container">
+        <div class="col">
+          <ul>
+            <li><code class="brown">01000000</code> - Version
+            <li><code class="light-blue">0001</code> - Segwit Marker
+            <li><code class="red">01</code> - Number of inputs
+            <li><code class="blue">376a…25</code> - Prev tx hash
+            <li><code class="magenta">00000000</code> - Prev tx index
+            <li><code class="yellow">00</code> - ScriptSig
+            <li><code class="purple">ffffffff</code> - Sequence
+          </ul>
+        </div>
+        <div class="col">
+          <ul>
+            <li><code class="red">02</code> - Number of outputs
+            <li><code class="green">409c…00</code> - Amount in Satoshis
+            <li><code class="dark-orange">1600…14</code> - ScriptPubKey
+            <li><code class="cyan">0140…5f</code> - Witness
+            <li><code class="dark-red">00000000</code> - Locktime
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+  <section>
+    <h2>Pay-to-TapRoot (P2TR)</h2>
+    <div class="fragment">ScriptPubKey:
+      <div class="medhex"><code class="red">51</code><code class="green">20</code><code class="yellow">4994481c22c21fb6f1362b154b86ec3d04890594b127ae658dda76c6c1cfcf5e</code></div>
+      <ul class="fragment medhex">
+        <li><code class="red">51</code> - <code>OP_1</code></li>
+        <li><code class="green">20</code> - length of $x$-only pubkey</li>
+        <li><code class="yellow">4994...5e</code> - $x$-only pubkey</li>
+      </ul>
+    </div>
+    <div class="fragment">ScriptSig:
+      <div class="medhex"></div>
+    </div>
+  </section>
+  <section>
+    <h2>Combined Script</h2>
+    <div class="container">
+    <div class="stack">
+      <div class="row">
+        ScriptPubKey
+      </div>
+      <div class="row">
+        <span class="op red">OP_1</span>
+        <span class="elem green">32-bytes</span>
+      </div>
+      <div class="row">
+      </div>
+    </div>
+    <div class="stack">
+      <div class="row">
+        ScriptSig
+      </div>
+      <div class="row">
+      </div>
+    </div>
+    <div class="stack">
+      <div class="row">
+        Combined
+      </div>
+      <div class="row">
+        <span class="op red">OP_1</span>
+      </div>
+      <div class="row">
+        <span class="elem green">32-bytes</span>
+      </div>
+    </div>
+  </section>
+  <section>
+    <iframe width="1120" height="630" src="https://www.youtube.com/embed/UdO-tkmzKPs?si=HwY_U1UmAc4BlEih" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+  </section>
+  <section>
+    <h3>Witness</h3>
+    <div class="bighex"><code class="red">01</code><code class="cyan">4002de2a8a88783937f10742235dfdf6a0f9526f4e8eee9d3d4cd11d5813269a0d1b56b5028b81735dae9d3dd9b9f2fe2193474dba0569cff087c2575f0f8f5b5f</code><p/>
+      <ul>
+        <li class="fragment"><code class="red">01</code> - Number of Witness elements</li>
+        <li class="fragment"><code class="cyan">4002…5f</code> - Schnorr Signature</li>
+      </ul>
+    </div>
+  </section>
+  <section>
+    <h2><code>OP_CHECKSIGADD</code></h2>
+    <ul>
+      <li class="fragment"> Consumes the top three elements: a pubkey, a number, and a signature.
+      <li class="fragment"> Valid sig, pushes the number+1 to the stack
+      <li class="fragment"> Invalid sig, pushes the number back to the stack
+    </ul>
+    <table class="medhex">
+      <tr class="fragment">
+        <td>
+          Valid
+        </td>
+        <td>
+          <span class="op brown">OP_CHECKSIGADD</span>
+        </td>
+        <td>
+          <div class="stack">
+            <div class="row">
+              <span class="elem blue">PubKey</span>
+            </div>
+            <div class="row">
+              <span class="elem red">n</span>
+            </div>
+            <div class="row">
+              <span class="elem brown">Signature</span>
+            </div>
+          </div>
+        </td>
+        <td>
+          $\Rightarrow$
+        </td>
+        <td>
+          <div class="stack">
+            <div class="row">
+              <span class="elem red">n+1</span>
+            </div>
+          </div>
+        </td>
+      </tr>
+      <tr class="fragment">
+        <td>
+          Invalid
+        </td>
+        <td>
+          <span class="op brown">OP_CHECKSIGADD</span>
+        </td>
+        <td>
+          <div class="stack">
+            <div class="row">
+              <span class="elem blue">PubKey</span>
+            </div>
+            <div class="row">
+              <span class="elem red">n</span>
+            </div>
+            <div class="row">
+              <span class="elem brown">Signature</span>
+            </div>
+          </div>
+        </td>
+        <td>
+          $\Rightarrow$
+        </td>
+        <td>
+          <div class="stack">
+            <div class="row">
+              <span class="elem red">n</span>
+            </div>
+          </div>
+        </td>
+      </tr>
+    </table>
+  </section>
+  <section>
+    <h3>Example Multisig using OP_CHECKSIGADD</h3>
+    <div class="container">
+      <div class="stack">
+        <div class="row">TapScript</div>
+        <span class="elem blue">PubKey A</span>
+        <span class="op brown">OP_CHECKSIG</span>
+        <span class="elem blue">PubKey B</span>
+        <span class="op brown">OP_CHECKSIGADD</span>
+        <span class="elem blue">PubKey C</span>
+        <span class="op brown">OP_CHECKSIGADD</span>
+        <span class="op red">OP_2</span>
+        <span class="op brown">OP_EQUAL</span>
+     </div>
+      <div class="stack">
+        <div class="row">Witness</div>
+        <span class="elem brown">Signature for C</span>
+        <span class="elem brown">''</span>
+        <span class="elem brown">Signature for A</span>
+     </div>
+    <div class="stack">
+        <div class="row">Execution</div>
+        <span class="elem brown">Signature for C</span>
+        <span class="elem brown">''</span>
+        <span class="elem brown">Signature for A</span>
+        <span class="elem blue">PubKey A</span>
+        <span class="op brown">OP_CHECKSIG</span>
+        <span class="elem blue">PubKey B</span>
+        <span class="op brown">OP_CHECKSIGADD</span>
+        <span class="elem blue">PubKey C</span>
+        <span class="op brown">OP_CHECKSIGADD</span>
+        <span class="op red">OP_2</span>
+        <span class="op brown">OP_EQUAL</span>
+    </div>
+    </div>
+  </section>
+  <section>
+  <iframe width="1120" height="630" src="https://www.youtube.com/embed/JHUePe4h6ao?si=yAKHtJ1thZAr8SCo" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+  </section>
+  <section>
+    <pre><code data-trim data-noescape class="python">
+def op_checksigadd_schnorr(stack, tx_obj, input_index):
+    # check to see if there's at least 3 elements
+    if len(stack) < 3:
+        return False
+    # pop off the pubkey
+    pubkey = stack.pop()
+    # pop off the n and do decode_num on it
+    n = decode_num(stack.pop())
+    # pop off the signature
+    sig = stack.pop()
+    # parse the pubkey
+    point = S256Point.parse_xonly(pubkey)
+    # if the signature has 0 length, it is not valid
+    # so put encode_num(n) back on stack and return True
+    if len(sig) == 0:
+        stack.append(encode_num(n))
+        return True
+    # use the get_signature_and_hashtype function on the sig
+    schnorr, hash_type = get_signature_and_hashtype(sig)
+    # get the message from the tx_obj.sig_hash using input index and hash type
+    msg = tx_obj.sig_hash(input_index, hash_type)
+    # verify the Schnorr signature
+    if point.verify_schnorr(msg, schnorr):
+        # if valid, increment the n, encode_num it and push back on stack
+        stack.append(encode_num(n + 1))
+    else:
+        # if invalid, encode_num on n and push back on stack
+        stack.append(encode_num(n))
+    # return True for successful execution
+    return True
+    </code></pre>
+  </section>
+  <section>
+    <h2>Example TapScripts</h2>
+    <ul>
+      <li class="fragment">1-of-1 (pay-to-pubkey) [pubkey, <code>OP_CHECKSIG</code>]
+      <li class="fragment">2-of-2 [pubkey A, <code>OP_CHECKSIGVERIFY</code>, pubkey B, <code>OP_CHECKSIG</code>]
+      <li class="fragment">2-of-3 [pubkey A, <code>OP_CHECKSIG</code>, pubkey B, <code>OP_CHECKSIGADD</code>, pubkey C, <code>OP_CHECKSIGADD</code>, <code>OP_2</code>, <code>OP_EQUAL</code>]
+      <li class="fragment">halvening timelock 1-of-1 [840000, <code>OP_CHECKLOCKTIMEVERIFY</code>, <code>OP_DROP</code>, pubkey, <code>OP_CHECKSIG</code>]
+    </ul>
+  </section>
+  <section>
+    <h2>Example TapScript</h2>
+    <pre><code data-trim data-noescape class="python">
+# Example TapScripts
+from ecc import PrivateKey
+from op import encode_minimal_num
+from taproot import TapScript
+pubkey_a = PrivateKey(11111111).point.xonly()
+pubkey_b = PrivateKey(22222222).point.xonly()
+pubkey_c = PrivateKey(33333333).point.xonly()
+# 1-of-1 (0xAC is OP_CHECKSIG)
+script_pubkey = TapScript([pubkey_a, 0xAC])
+print(script_pubkey)
+# 2-of-2 (0xAD is OP_CHECKSIGVERIFY)
+script_pubkey = TapScript([pubkey_a, 0xAD, pubkey_b, 0xAC])
+print(script_pubkey)
+# 2-of-3 (0xBA is OP_CHECKSIGADD, 0x52 is OP_2, 0x87 is OP_EQUAL)
+script_pubkey = TapScript([pubkey_a, 0xAD, pubkey_b, 0xBA, pubkey_c, 0xBA, 0x52, 0x87])
+print(script_pubkey)
+# halvening timelock 1-of-1 (0xB1 is OP_CLTV, 0x75 is OP_DROP)
+script_pubkey = TapScript([encode_minimal_num(840000), 0xB1, 0x75, pubkey_a, 0xAC])
+print(script_pubkey)
+    </code></pre>
+  </section>
+  <section>
+    <h2>Exercises</h2>
+    <ol start="2">
+      <li>Make a TapScript for a 4-of-4 using pubkeys from private keys which correspond to 10101, 20202, 30303, 40404
+    </ol>
+  </section>
+</section>
+<section>
+  <section>
+    <h2>TapLeaf</h2>
+  </section>
+  <section>
+    <h2>Taproot Structure</h2>
+    <div class="tree">
+      <ul>
+        <li>
+          <div class="blue">External PubKey $Q$</div>
+          <ul>
+            <li>
+              <div class="green">Internal PubKey $P$</div>
+            </li>
+            <li>
+              <div class="brown">Merkle Root $m$</div>
+                <ul>
+                  <li>
+                    <div class="brown">TapBranch</div>
+                    <ul>
+                      <li>
+                        <div class="brown"><strong style="color:red"> TapLeaf </strong></div>
+                        <ul>
+                          <li>
+                            <div class="brown">TapScript</div>
+                          </li>
+                        </ul>
+                      </li>
+                      <li>
+                        <div class="brown">TapLeaf</div>
+                        <ul>
+                          <li>
+                            <div class="brown">TapScript</div>
+                          </li>
+                        </ul>
+                      </li>
+                    </ul>
+                  </li>
+                  <li>
+                    <div class="brown">TapLeaf</div>
+                    <ul>
+                      <li>
+                        <div class="brown">TapScript</div>
+                      </li>
+                    </ul>
+                  </li>
+                </ul>
+            </li>
+          </ul>
+        </li>
+      </ul>
+    </div>
+  </section>
+  <section>
+    <h2>What is a TapLeaf?</h2>
+    <ul>
+      <li class="fragment">Leaves of the Merkle Tree which contain TapScripts
+      <li class="fragment">Contains TapLeaf Version (<code>0xc0</code>) and TapScript
+      <li class="fragment">Any Leaf can successfully execute to spend using the Taproot Script Path
+      <li class="fragment">Hash of a TapLeaf is a Tagged Hash (TapLeaf) of the version + TapScript
+    </ul>
+  </section>
+  <section>
+    <h2>Example TapLeaf Hash</h2>
+    <pre><code data-trim data-noescape class="python">
+# Example of making a TapLeaf and calculating the hash
+from ecc import PrivateKey
+from hash import hash_tapleaf
+from helper import int_to_byte
+from taproot import TapScript, TapLeaf
+pubkey_a = PrivateKey(11111111).point.xonly()
+pubkey_b = PrivateKey(22222222).point.xonly()
+tap_script = TapScript([pubkey_a, 0xAD, pubkey_b, 0xAC])
+tap_leaf = TapLeaf(tap_script)
+h = hash_tapleaf(int_to_byte(tap_leaf.tapleaf_version) + tap_leaf.tap_script.serialize())
+print(h.hex())
+    </code></pre>
+  </section>
+  <section>
+    <h2>Exercises</h2>
+    <ol start="3">
+      <li>Calculate the TapLeaf hash whose TapScript is a 2-of-4 using pubkeys from private keys which correspond to 10101, 20202, 30303, 40404
+      <li>Make this test pass: <code>taproot:TapRootTest:test_tapleaf_hash</code>
+    </ol>
+  </section>
+</section>
+<section>
+  <section>
+    <h2>TapBranch</h2>
+  </section>
+  <section>
+    <h2>Taproot Structure</h2>
+    <div class="tree">
+      <ul>
+        <li>
+          <div class="blue">External PubKey $Q$</div>
+          <ul>
+            <li>
+              <div class="green">Internal PubKey $P$</div>
+            </li>
+            <li>
+              <div class="brown">Merkle Root $m$</div>
+                <ul>
+                  <li>
+                    <div class="brown"><strong style="color:red">TapBranch</strong></div>
+                    <ul>
+                      <li>
+                        <div class="brown">TapLeaf</div>
+                        <ul>
+                          <li>
+                            <div class="brown">TapScript</div>
+                          </li>
+                        </ul>
+                      </li>
+                      <li>
+                        <div class="brown">TapLeaf</div>
+                        <ul>
+                          <li>
+                            <div class="brown">TapScript</div>
+                          </li>
+                        </ul>
+                      </li>
+                    </ul>
+                  </li>
+                  <li>
+                    <div class="brown">TapLeaf</div>
+                    <ul>
+                      <li>
+                        <div class="brown">TapScript</div>
+                      </li>
+                    </ul>
+                  </li>
+                </ul>
+            </li>
+          </ul>
+        </li>
+      </ul>
+    </div>
+  </section>
+  <section>
+    <h2>What is a TapBranch?</h2>
+    <ul>
+      <li class="fragment">Branches of the Merkle Tree
+      <li class="fragment">Contains a left child and a right child.
+      <li class="fragment">Each child is a TapLeaf or TapBranch
+      <li class="fragment">Hash of a TapBranch is a Tagged Hash (TapBranch) of the left hash and right hash, sorted
+      <li class="fragment">Sorting makes verification of the merkle root much easier
+    </ul>
+  </section>
+  <section>
+    <h2>Example TapBranch Hash</h2>
+    <pre><code data-trim data-noescape class="python">
+# Example of making a TapBranch and calculating the hash
+from ecc import PrivateKey
+from hash import hash_tapbranch
+from helper import int_to_byte
+from taproot import TapScript, TapLeaf, TapBranch
+pubkey_1 = PrivateKey(11111111).point.xonly()
+pubkey_2 = PrivateKey(22222222).point.xonly()
+tap_script_1 = TapScript([pubkey_1, 0xAC])
+tap_script_2 = TapScript([pubkey_2, 0xAC])
+tap_leaf_1 = TapLeaf(tap_script_1)
+tap_leaf_2 = TapLeaf(tap_script_2)
+tap_branch = TapBranch(tap_leaf_1, tap_leaf_2)
+left_hash = tap_leaf_1.hash()
+right_hash = tap_leaf_2.hash()
+if left_hash > right_hash:
+    h = hash_tapbranch(left_hash + right_hash)
+else:
+    h = hash_tapbranch(right_hash + left_hash)
+print(h.hex())
+    </code></pre>
+  </section>
+  <section>
+    <h2>Exercises</h2>
+    <ol start="5">
+      <li>Calculate the TabBranch hash whose left and right nodes are TapLeafs whose TapScripts are for a 1-of-2 using pubkeys from private keys which correspond to (10101, 20202) for the left, (30303, 40404) for the right
+      <li>Make this test pass: <code>taproot:TapRootTest:test_tapbranch_hash</code>
+    </ol>
+  </section>
+</section>
+<section>
+  <section>
+    <h2>Merkle Root</h2>
+  </section>
+  <section>
+    <h2>Taproot Structure</h2>
+    <div class="tree">
+      <ul>
+        <li>
+          <div class="blue">External PubKey $Q$</div>
+          <ul>
+            <li>
+              <div class="green">Internal PubKey $P$</div>
+            </li>
+            <li>
+              <div class="brown"><strong style="color:red">Merkle Root $m$</strong></div>
+                <ul>
+                  <li>
+                    <div class="brown">TapBranch</div>
+                    <ul>
+                      <li>
+                        <div class="brown">TapLeaf</div>
+                        <ul>
+                          <li>
+                            <div class="brown">TapScript</div>
+                          </li>
+                        </ul>
+                      </li>
+                      <li>
+                        <div class="brown">TapLeaf</div>
+                        <ul>
+                          <li>
+                            <div class="brown">TapScript</div>
+                          </li>
+                        </ul>
+                      </li>
+                    </ul>
+                  </li>
+                  <li>
+                    <div class="brown">TapLeaf</div>
+                    <ul>
+                      <li>
+                        <div class="brown">TapScript</div>
+                      </li>
+                    </ul>
+                  </li>
+                </ul>
+            </li>
+          </ul>
+        </li>
+      </ul>
+    </div>
+  </section>
+  <section>
+    <h2>Design</h2>
+    <ul>
+      <li class="fragment">Merkle Root $m$ is used to compute the tweak $t$
+      <li class="fragment">Can be a TapLeaf (1 condition) or TapBranch (more than 1 condition) or nothing (0 conditions)
+      <li class="fragment">Any TapScript inside the tree can unlock the UTXO
+      <li class="fragment">Unlocking also requires the Control Block
+      <li class="fragment">Spending conditions stay hidden unless used
+      <li class="fragment">Up to 128 levels, meaning $2^{128}$ conditions
+    </ul>
+  </section>
+  <section>
+    <h2>Computing the Merkle Root</h2>
+    <ul>
+      <li class="fragment">Merkle Root is the hash of the root element of the Merkle Tree which may be TapLeaf, TapBranch or nothing
+      <li class="fragment">TapLeaf Hash is hash_tapleaf(version + TapScript serialization)
+      <li class="fragment">TapBranch Hash is hash_tapbranch(sorted(left, right))
+      <li class="fragment">It doesn't have to be a hash of anything, just any 32 bytes
+      <li class="fragment">Means addresses can be changed at will
+    </ul>
+  </section>
+  <section>
+    <h2>Example Merkle Root Hash</h2>
+    <pre><code data-trim data-noescape class="python">
+# Example of Comupting the Merkle Root
+from ecc import PrivateKey
+from hash import hash_tapbranch
+from helper import int_to_byte
+from taproot import TapScript, TapLeaf, TapBranch
+pubkey_1 = PrivateKey(11111111).point.xonly()
+pubkey_2 = PrivateKey(22222222).point.xonly()
+pubkey_3 = PrivateKey(33333333).point.xonly()
+tap_script_1 = TapScript([pubkey_1, 0xAC])
+tap_script_2 = TapScript([pubkey_2, 0xAC])
+tap_script_3 = TapScript([pubkey_3, 0xAC])
+tap_leaf_1 = TapLeaf(tap_script_1)
+tap_leaf_2 = TapLeaf(tap_script_2)
+tap_leaf_3 = TapLeaf(tap_script_3)
+tap_branch_1 = TapBranch(tap_leaf_1, tap_leaf_2)
+tap_root = TapBranch(tap_branch_1, tap_leaf_3)
+merkle_root = tap_root.hash()
+print(merkle_root.hex())
+    </code></pre>
+  </section>
+  <section>
+    <h2>Exercises</h2>
+    <ol start="7">
+      <li>Calculate the External PubKey for a Taproot output whose internal pubkey is 90909 and whose Merkle Root is from two TapBranches, each of which is a single signature TapLeaf. The private keys corresponding to the left TapBranch's TapLeafs are 10101 and 20202. The private keys corresponding to the right TapBranch's TapLeafs are 30303 and 40404.
+    </ol>
+  </section>
+</section>
+<section>
+  <section>
+    <h2>Script Path Spending </h2>
+  </section>
+  <section>
+    <h2>Control Block</h2>
+    <ul>
+      <li class="fragment">Used to prove the UTXO contains the TapScript
+      <li class="fragment">The hashes of the Merkle Proof and the Internal Public Key are revealed in it
+      <li class="fragment">Control Block is the last element of the Witness field
+      <li class="fragment">TapScript is the second-to-last element
+      <li class="fragment">The hash of the TapScript, the Merkle Proof and Interal PubKey combine to produce the External Pubkey in the UTXO
+      <li class="fragment">The rest of the elements of the Witness field satisfy the TapScript
+    </ul>
+  </section>
+  <section>
+    <h2>Control Block Serialization</h2>
+    <ul>
+      <li class="fragment">Start with TapScript Version (<code>0xc0</code> or <code>0xc1</code>)
+      <li class="fragment">The last bit of the TapScript Version expresses the parity of the external pubkey, which is necessary for batch verification
+      <li class="fragment">$x$-only serialization of the Internal PubKey $P$ (32 bytes)
+      <li class="fragment">Merkle Proof as a list of 32-byte hashes
+    </ul>
+  </section>
+  <section>
+    <h2>Merkle Proof Verification Algorithm</h2>
+    <ul>
+      <li class="fragment">Hash the TapScript version and the TapScript to get the TapLeaf's hash
+      <li class="fragment">Hash the TapLeaf hash and the first Merkle Proof hash sorted
+      <li class="fragment">Hash the current hash and the next Merkle Proof hash sorted, until there are no hashes left
+      <li class="fragment">The result is the Merkle Root $m$. Then compute the tweak: $t=\mathcal{H}(P||m)$ where $\mathcal{H}$ is <code>hash_taptweak</code>
+      <li class="fragment">Internal Public Key $P$ is used to compute external public key $Q=P+tG$. If Q matches the UTXO, TapScript is valid.
+      <li class="fragment">Verify the other elements of Witness satisfy the TapScript
+    </ul>
+  </section>
+  <section>
+    <h2>Merkle Proof</h2>
+    <div class="tree">
+      <ul>
+        <li>
+          <div class="blue">External PubKey $Q$</div>
+          <ul>
+            <li>
+              <div class="green">Internal PubKey $P$</div>
+            </li>
+            <li>
+              <div class="brown"><strong style="color:green">Merkle Root</strong></div>
+                <ul>
+                  <li>
+                    <div class="brown"><strong style="color:green">TapBranch</strong></div>
+                    <ul>
+                      <li>
+                        <div class="brown"><strong style="color:blue">TapLeaf</strong></div>
+                        <ul>
+                          <li>
+                            <div class="brown">TapScript</div>
+                          </li>
+                        </ul>
+                      </li>
+                      <li>
+                        <div class="brown"><strong style="color:red">TapLeaf</strong></div>
+                        <ul>
+                          <li>
+                            <div class="brown">TapScript</div>
+                          </li>
+                        </ul>
+                      </li>
+                    </ul>
+                  </li>
+                  <li>
+                    <div class="brown"><strong style="color:blue">TapLeaf</strong></div>
+                    <ul>
+                      <li>
+                        <div class="brown">TapScript</div>
+                      </li>
+                    </ul>
+                  </li>
+                </ul>
+            </li>
+          </ul>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>Control Block Validation Example</h2>
+    <pre><code data-trim data-noescape class="python">
+# Example of Control Block Validation
+from ecc import PrivateKey, S256Point
+from hash import hash_tapbranch
+from taproot import TapScript, TapLeaf, TapBranch
+q_xonly = bytes.fromhex("cbe433288ae1eede1f24818f08046d4e647fef808cfbbffc7d10f24a698eecfd")
+pubkey_2 = bytes.fromhex("027aa71d9cdb31cd8fe037a6f441e624fe478a2deece7affa840312b14e971a4")
+tap_script_2 = TapScript([pubkey_2, 0xAC])
+tap_leaf_2 = TapLeaf(tap_script_2)
+tap_leaf_1_hash = bytes.fromhex("76f5c1cdfc8b07dc8edca5bef2b4991201c5a0e18b1dbbcfe00ef2295b8f6dff")
+tap_leaf_3_hash = bytes.fromhex("5dd270ec91aa5644d907059400edfd98e307a6f1c6fe3a2d1d4550674ff6bc6e")
+p = S256Point.parse(bytes.fromhex("407910a4cfa5fe195ad4844b6069489fcb429f27dff811c65e99f7d776e943e5"))
+current = tap_leaf_2.hash()
+for h in (tap_leaf_1_hash, tap_leaf_3_hash):
+    if h < current:
+        current = hash_tapbranch(h + current)
+    else:
+        current = hash_tapbranch(current + h)
+m = current
+q = p.tweaked_key(m)
+print(q.xonly() == q_xonly)
+print(p.p2tr_address(m, network="signet"))
+    </code></pre>
+  </section>
+  <section>
+    <h2>Exercises</h2>
+    <ol start="8">
+      <li>Validate the Control Block for the pubkey whose private key is 40404 for the external pubkey from the last exercise
+      <li>Make this test pass: <code>taproot:TapRootTest:test_control_block</code>
+    </ol>
+  </section>
+  <section>
+    <h2>Exercise 9</h2>
+    Create a Signet P2TR address with these Script Spend conditions:
+
+    <ol>
+      <li>Internal Public Key is <code>cd04c1...51d9e</code>
+      <li>Leaf 1 and Leaf 2 make Branch 1, Branch 1 and Leaf 3 make Branch 2, which is the Merkle Root
+      <li>All TapLeaf are single key locked TapScripts (pubkey, OP_CHECKSIG)
+      <li>Leaf 1 uses your xonly pubkey
+      <li>Leaf 2 uses this xonly pubkey: <code>331a8f...74aeec</code>
+      <li>Leaf 3 uses this xonly pubkey: <code>158a49...8ff16f</code>
+    </ol>
+  </section>
+</section>
+</div>
+</div>
+<script src="../dist/reveal.js"></script>
+<script src="../plugin/notes/notes.js"></script>
+<script src="../plugin/markdown/markdown.js"></script>
+<script src="../plugin/highlight/highlight.js"></script>
+<script src="../plugin/math/math.js"></script>
+<script>
+  // More info about initialization & config:
+  // - https://revealjs.com/initialization/
+  // - https://revealjs.com/config/
+  Reveal.initialize({
+      hash: true,
+      plugins: [ RevealMarkdown, RevealHighlight, RevealNotes, RevealMath ]
+  });
+  MathJax.Hub.Config({
+      jax: ["input/TeX","output/HTML-CSS"],
+      displayAlign: "left"
+  });
+</script>
+</body>
+</html>

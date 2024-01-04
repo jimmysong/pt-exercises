@@ -1,0 +1,55 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+    <title>Programming Blockchain</title>
+
+    <link rel="stylesheet" href="dist/custom.css">
+    <link rel="stylesheet" href="dist/reset.css">
+    <link rel="stylesheet" href="dist/reveal.css">
+    <link rel="stylesheet" href="dist/theme/solarized.css">
+
+    <!-- Theme used for syntax highlighted code -->
+    <link rel="stylesheet" href="plugin/highlight/monokai.css">
+  </head>
+  <body>
+    <div class="reveal">
+      <div class="slides">
+        <section>
+          <h1>Programming Taproot</h1>
+          <h3>https://github.com/jimmysong/pt-exercises</h3>
+          Follow the instructions in README.md
+        </section>
+        <section>
+          <h2> Class Schedule </h2>
+              <ul>
+                <li><a href="session1/index.html">Schnorr Signatures/KeyPath Spend</a></li>
+                <li><a href="session2/index.html">ScriptPath Spend</a></li>
+                <li><a href="session3/index.html">MuSig</a></li>
+                <li><a href="session4/index.html">FROST</a></li>
+              </ul>
+        </section>
+      </div>
+    </div>
+    <script src="dist/reveal.js"></script>
+    <script src="plugin/notes/notes.js"></script>
+    <script src="plugin/markdown/markdown.js"></script>
+    <script src="plugin/highlight/highlight.js"></script>
+    <script src="plugin/math/math.js"></script>
+    <script>
+      // More info about initialization & config:
+      // - https://revealjs.com/initialization/
+      // - https://revealjs.com/config/
+      Reveal.initialize({
+          hash: true,
+          plugins: [ RevealMarkdown, RevealHighlight, RevealNotes, RevealMath ]
+      });
+      MathJax.Hub.Config({
+          jax: ["input/TeX","output/HTML-CSS"],
+          displayAlign: "left"
+      });
+    </script>
+  </body>
+</html>

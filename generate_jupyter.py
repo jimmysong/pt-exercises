@@ -4,7 +4,7 @@ import sys
 
 sessions = [int(a) for a in sys.argv[1:]]
 if len(sessions) == 0:
-    sessions = range(3)
+    sessions = range(4)
 
 FIRST_CELL = '''############## PLEASE RUN THIS CELL FIRST! ###################
 
