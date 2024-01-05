@@ -2,7 +2,7 @@ import sys
 
 sessions = [int(a) for a in sys.argv[1:]]
 if len(sessions) == 0:
-    sessions = range(4)
+    sessions = range(5)
 
 
 def chop_word(s):

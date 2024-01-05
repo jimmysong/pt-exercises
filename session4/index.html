@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
-    <title>Session 3 - MuSig</title>
+    <title>Session 4 - Frost</title>
 
     <link rel="stylesheet" href="../dist/custom.css">
     <link rel="stylesheet" href="../dist/reset.css">
@@ -36,43 +36,42 @@
     <ul>
       <li><strong>Schnorr Signatures/Key Path Spend</strong>
       <li><strong>Script Path Spending</strong>
-      <li class="current"><strong>MuSig</strong>
-      <li><strong>FROST</strong>
+      <li><strong>MuSig</strong>
+      <li class="current"><strong>FROST</strong>
     </ul>
   </section>
   <section>
     <h2>Session Objectives</h2>
     <ul>
-      <li class="fragment"><strong>Create a p2tr Script Path Spending Transaction</strong>
-      <li class="fragment"><strong>MuSig2 PubKey Aggregation</strong>
-      <li class="fragment"><strong>MuSig2 Distributed Nonce Creation/Aggregation</strong>
-      <li class="fragment"><strong>MuSig2 Partial Signature Creation/Aggregation </strong>
-      <li class="fragment"><strong>MuSig2 Tweak Handling</strong>
+      <li class="fragment"><strong>Create a p2tr MuSig2 Spending Transaction</strong>
+      <li class="fragment"><strong>Shamir's Secret Sharing</strong>
+      <li class="fragment"><strong>FROST Key Generation</strong>
+      <li class="fragment"><strong>FROST Partial Signature Creation/Aggregation </strong>
+      <li class="fragment"><strong>FROST Tweak Handling</strong>
     </ul>
   </section>
 </section>
 <section>
   <section>
-    <h2>P2TR ScriptPath Spending</h2>
+    <h2>P2TR MuSig2 Spending</h2>
   </section>
   <section>
-    <h2>Merkle Proof</h2>
     <div class="tree">
       <ul>
         <li>
           <div class="blue">External PubKey $Q$</div>
           <ul>
             <li>
-              <div class="green">Internal PubKey $P$</div>
+              <div class="green"><strong style="color:red"> Internal PubKey $P$ </strong></div>
             </li>
             <li>
-              <div class="brown"><strong style="color:green">Merkle Root</strong></div>
+              <div class="brown">Merkle Root $m$</div>
                 <ul>
                   <li>
-                    <div class="brown"><strong style="color:green">TapBranch</strong></div>
+                    <div class="brown">TapBranch</div>
                     <ul>
                       <li>
-                        <div class="brown"><strong style="color:red">TapLeaf</strong></div>
+                        <div class="brown">TapLeaf</div>
                         <ul>
                           <li>
                             <div class="brown">TapScript</div>
@@ -80,7 +79,7 @@
                         </ul>
                       </li>
                       <li>
-                        <div class="brown"><strong style="color:blue">TapLeaf</strong></div>
+                        <div class="brown">TapLeaf</div>
                         <ul>
                           <li>
                             <div class="brown">TapScript</div>
@@ -90,7 +89,7 @@
                     </ul>
                   </li>
                   <li>
-                    <div class="brown"><strong style="color:blue">TapLeaf</strong></div>
+                    <div class="brown">TapLeaf</div>
                     <ul>
                       <li>
                         <div class="brown">TapScript</div>
@@ -109,136 +108,153 @@
     <pre><code data-trim data-noescape class="python">
 ...
 my_secret = 21000000
-my_private_key = PrivateKey(my_secret)
-p = S256Point.parse(bytes.fromhex("cd04c1bf88ca891af152fc57c36523ab59efb16b7ec07caca0cfc4a1f2051d9e"))
-pubkey_2 = bytes.fromhex("331a8f6a14e1b41a6b523ddb505fbc0662a6446bd42408692497297d3474aeec")
-pubkey_3 = bytes.fromhex("158a49d62c384c539a453e41a70214cfb85184954ae5c8df4b47eb74d58ff16f")
-my_xonly = my_private_key.point.xonly()
-tap_script_1 = TapScript([my_xonly, 0xAC])
-tap_leaf_1 = TapLeaf(tap_script_1)
-tap_script_2 = TapScript([pubkey_2, 0xAC])
-tap_leaf_2 = TapLeaf(tap_script_2)
-tap_script_3 = TapScript([pubkey_3, 0xAC])
-tap_leaf_3 = TapLeaf(tap_script_3)
-prev_tx = bytes.fromhex("42251c52fa8c6a6a349eee1729ced9587483ea6d6e210d6c42bb640d33a4da25")
+me = MuSigParticipant(PrivateKey(my_secret))
+neighbor_pubkey = S256Point.parse(bytes.fromhex("029addad123cfcfa19c501dd1f15ca93b74a57ef88aa34035470dd46e54b5931c6"))
+pubkeys = [me.point, neighbor_pubkey]
+keyagg = KeyAggregator(pubkeys)
+group_point = keyagg.group_point
+ts = TapScript([group_point.xonly(), 0xAC])
+leaf = TapLeaf(ts)
+merkle_root = leaf.hash()
+coor = MuSigCoordinator(pubkeys, merkle_root)
+prev_tx = bytes.fromhex("4b5fbb9de406a16e133fdb9ea0adcfa2dac40c1f6b82e4b58d5ce28229618f1c")
 prev_index = 0
-target_address = "tb1pxh7kypwsvxnat0z6588pufhx43r2fnqjyn846qj5kx8mgqcamvjsyn5cjg"
 fee = 500
-tap_branch_1 = TapBranch(tap_leaf_1, tap_leaf_2)
-tap_branch_2 = TapBranch(tap_branch_1, tap_leaf_3)
 tx_in = TxIn(prev_tx, prev_index)
 target_amount = tx_in.value(network="signet") - fee
-target_script = address_to_script_pubkey(target_address)
+target_script = address_to_script_pubkey("tb1q7kn55vf3mmd40gyj46r245lw87dc6us5n50lrg")
 tx_out = TxOut(target_amount, target_script)
 tx_obj = Tx(1, [tx_in], [tx_out], network="signet", segwit=True)
-cb = tap_branch_2.control_block(p, tap_leaf_1)
-tx_in.witness = Witness([tap_script_1.raw_serialize(), cb.serialize()])
 msg = tx_obj.sig_hash(0)
-sig = my_private_key.sign_schnorr(msg).serialize()
-tx_in.witness.items.insert(0, sig)
-tx_obj.verify()
+my_nonce_share = me.generate_nonce_share(msg=msg, aggregate_pubkey=group_point, rand=b'')
+print(my_nonce_share.serialize().hex())
+neighbor_share = NoncePublicShare.parse(bytes.fromhex("02d8ffef7503cec7a5046d238f53d5f599e57772813aa8b4c1cbd017a453fbcd25026bc7edd0264573f8e90e2f1d6753b0004010d8d1c235f5f1c44995f5376a0e81"))
+coor.register_nonce_share(me.point.sec(), my_nonce_share)
+coor.register_nonce_share(neighbor_pubkey.sec(), neighbor_share)
+context = coor.create_signing_context(msg)
+my_partial_sig = me.sign(context)
+coor.register_partial_sig(me.point.sec(), my_partial_sig)
+print(my_partial_sig.hex())
+neighbor_sig = bytes.fromhex("82420b4a9accb4392eb850cb1853849a03a35711f3d7ae112eff9fd3214bc538")
+coor.register_partial_sig(neighbor_pubkey.sec(), neighbor_sig)
+sig = coor.compute_sig().serialize()
+tx_in.finalize_p2tr_keypath(sig)
+print(tx_obj.verify())
 print(tx_obj.serialize().hex())
     </code></pre>
   </section>
   <section>
     <h2>Exercises</h2>
     <ol start="1">
-      <li> You have been sent 100,000 sats to the address you created in the last exercise of the last session. Use the TapScript with your pubkey to spend all of it and send everything minus the fee to <code>tb1q7kn55vf3mmd40gyj46r245lw87dc6us5n50lrg</code>. Use <a href="https://mempool.space/signet/tx/push to broadcast your transaction" target="_mempool">Mempool Signet</a> to broadcast your transaction.
+      <li> You have been sent 2 UTXOs to the address you created in the last session. KeyPath spend one of the UTXO to <code>tb1q7kn55vf3mmd40gyj46r245lw87dc6us5n50lrg</code>.
+
+      <li> BONUS! You have been sent 2 UTXOs to the address you created in the last session. ScriptPath spend the UTXO you haven't spent yet to the same address.
     </ol>
+        <p> Use <a href="https://mempool.space/signet/tx/push to broadcast your transaction" target="_mempool">Mempool Signet</a> to broadcast your transaction.</p>
   </section>
 </section>
 <section>
   <section>
-    <h2>MuSig2 PubKey Aggregation</h2>
+    <h2>Shamir's Secret Sharing</h2>
   </section>
   <section>
-    <h2>What is MuSig2?</h2>
+    <h2>What is Shamir's Secret Sharing (SSS)?</h2>
     <ul>
-      <li class="fragment">A way to make a single signature and a single pubkey from many pubkeys
-      <li class="fragment">This is done through pubkey aggregation and signature aggregation
-      <li class="fragment">Essentially the same as n-of-n but with less on-chain footprint
-      <li class="fragment">Can be done because of Schnorr Signatures' use of R and not just the x-coordinate used by ECDSA
-      <li class="fragment">Defined in BIP327, which avoids a lot of the pitfalls of nonce generation
+      <li class="fragment">A way to distribute a secret where $t$ of $n$ pieces are needed to reconstruct
+      <li class="fragment">$t$ is called the threshold needed to recover the secret
+      <li class="fragment">$n$ is the number of shares
+      <li class="fragment">Having $t-1$ shares gives you no information about the secret
+      <li class="fragment">Having $t$ shares allows you to recover the secret
     </ul>
   </section>
   <section>
-    <h2>Key Aggregation</h2>
+    <h2>How SSS Works</h2>
     <ul>
-      <li class="fragment">Produce a Schnorr signature $(R,s)$ from a group of n public keys, $P_1, P_2, ..., P_n$ and present a single public key $P$ to satisfy $R=sG−dP$
-      <li class="fragment">Each participant has its own secret $e_i G = P_i$
-      <li class="fragment">We create a Group Commitment $L = H(P_1||P_2||...||P_n)$
-      <li class="fragment">Each Public key gets its own coefficient, $c_i = H(L, P_i)$
-      <li class="fragment">The Group Public Key, $P = c_1P_1 + c_2P_2... + c_nP_n$
+      <li class="fragment">Technique is using something called Polynomial Interpolation over a Finite Field
+      <li class="fragment">Intuitively, this is the idea that $t$ points define a $t-1$ degree polynomial
+      <li class="fragment">For example, 2 points define a line (degree-1 polynomial), 3 points define a parabola (degree-2 polynomial), etc.
     </ul>
   </section>
   <section>
-    <h2>Example Key Aggregation</h2>
+    <h2>Polynomials of Varying Degrees</h2>
+    <img src="../images/interpolation.svg">
+  </section>
+  <section>
+    <h2>Trusted Dealer Setup</h2>
+    <ul>
+      <li class="fragment">Dealer generates a secret $e$
+      <li class="fragment">Dealer creates a degree $t-1$ polynomial with random coefficients $a_1,...,a_{t-1}$
+      <li class="fragment">The dealer creates a polynomial $f(x)=e+a_1x+a_2x^2+...+a_{t-1}x^{t-1}$
+      <li class="fragment">$f(0)=e$ so that's where the secret is
+      <li class="fragment">Participant $x$ gets dealt $f(x)=y_x$ $\forall{x} \in {1,2,...,n}$
+      <li class="fragment">$y_x$ is the share of the secret
+    </ul>
+  </section>
+  <section>
+    <h2>Example Shamir</h2>
     <pre><code data-trim data-noescape class="python">
-from ecc import S256Point
-from hash import hash_keyagglist, hash_keyaggcoef
-from helper import big_endian_to_int
-raw_pubkeys = ["02ed3bace23c5e17652e174c835fb72bf53ee306b3406a26890221b4cef7500f88", "03cd5a3be41717d65683fe7a9de8ae5b4b8feced69f26a8b55eeefbcc2e74b75fb", "0385a7b790fc9d962493788317e4874a4ab07f1e9c78c773c47f2f6c96df756f05"]
-pubkeys = [S256Point.parse(bytes.fromhex(r)) for r in raw_pubkeys]
-preimage = b""
-for pubkey in pubkeys:
-    preimage += pubkey.sec()
-group_commitment = hash_keyagglist(preimage)
-terms = []
-for p_i in pubkeys:
-    h = hash_keyaggcoef(group_commitment + p_i.sec())
-    c_i = big_endian_to_int(h)
-    terms.append(c * p_i)
-p = S256Point.sum(terms)
-print(p.sec().hex())
+# Example 3-of-5 Shamir
+from frost import PrivatePolynomial
+poly = PrivatePolynomial.generate(3)
+shares = {}
+for x in range(1, 6):
+    shares[x] = poly.y_value(x)
 </code></pre>
   </section>
   <section>
     <h2>Exercises</h2>
-    <ol start="2">
-      <li>Create a group public key using 6 component public keys
+    <ol start="3">
+      <li>Create 7 shares whose threshold is 4
     </ol>
+  </section>
+  <section>
+    <h2>Cryptography Use</h2>
+    <ul>
+      <li class="fragment">We limit the secret and coefficients to the prime field of $N = |\mathbb{G}|$, where $\mathbb{G}$ is the group generated by $G$
+      <li class="fragment">We do this so we can store a Bitcoin private key in shards.
+      <li class="fragment">Thus, every participant gets dealt $y_x$ which is a number in ${1,2,...,N}$
+      <li class="fragment">Threshold Multisig!
+      <li class="fragment">Can be used with Schnorr Signatures in FROST
+    </ul>
   </section>
 </section>
 <section>
   <section>
-    <h2>MuSig2 Key Aggregation in BIP327</h2>
+    <h2>Shamir Secret Recovery</h2>
   </section>
   <section>
-    <h2>BIP327 Key Aggregation</h2>
+    <h2>Recovering a Secret</h2>
     <ul>
-      <li class="fragment">The coefficients would work fine, but there's one optimization made in BIP327
-      <li class="fragment">Specifically, the second coefficient is always 1, all other coefficients stay the same
-      <li class="fragment">The reason that it's not the first is because of a corner case where all the public keys are the same
-      <li class="fragment">There's also the fact that there's the possibility of the group point being odd
-      <li class="fragment">The way this is solved is by every participant negating their secret
+      <li class="fragment">Designate $t$ participants that are doing the recovery $x \in X, |X|=t$
+      <li class="fragment">Each participant creates a LaGrange Interpolation Polynomial, $f_p(0)$ and multiplies by $y_x$
+      <li class="fragment">The Coordinator sums the values and that recovers the secret
     </ul>
   </section>
   <section>
-    <h2>Example TapLeaf Hash</h2>
+    <h2>Lagrange Interpolation Polynomial</h2>
+    <ul>
+      <li class="fragment">For a participant at $x_i$ where $X = \{x_1, x_2, ... x_t\}$
+      <li class="fragment">Goal is a $t-1$ degree polynomial $g(x)$ such that: $g(x_i)=1$ and $g(x_j)=0$ where $j\ne i$
+      <li class="fragment">Note $g(x_j)=0$ if $g(x)=(x-x_j)h(x)$
+      <li class="fragment">Let $h(x)=\prod_{j \ne i}{(x-x_j)}$
+      <li class="fragment">Note $h(x)$ is degree $t-1$
+      <li class="fragment">We note $h(x_i) = \prod_{j \ne i}{(x_i-x_j)}$
+      <li class="fragment">$g(x) = h(x)/h(x_i)$, $g(x_i)=h(x_i)/h(x_i)=1$ and $g(x_j)=0$ where $j\ne i$
+    </ul>
+  </section>
+  <section>
+    <h2>Example Interpolation Polynomial</h2>
     <pre><code data-trim data-noescape class="python">
-# creating a BIP327 group public key
-from ecc import S256Point
-from hash import hash_keyagglist, hash_keyaggcoef
-from helper import big_endian_to_int
-raw_pubkeys = ["02ed3bace23c5e17652e174c835fb72bf53ee306b3406a26890221b4cef7500f88", "03cd5a3be41717d65683fe7a9de8ae5b4b8feced69f26a8b55eeefbcc2e74b75fb", "0385a7b790fc9d962493788317e4874a4ab07f1e9c78c773c47f2f6c96df756f05"]
-pubkeys = [S256Point.parse(bytes.fromhex(r)) for r in raw_pubkeys]
-preimage = b""
-for pubkey in pubkeys:
-    preimage += pubkey.sec()
-group_commitment = hash_keyagglist(preimage)
-terms = []
-second_point = None
-for p_i in pubkeys:
-    if p_i != pubkeys[0] and second_point is None:
-        second_point = p_i
-    if p_i == second_point:
-        c_i = 1
-    else:
-        h = hash_keyaggcoef(group_commitment + p_i.sec())
-        c_i = big_endian_to_int(h)
-    terms.append(c_i * p_i)
-p = S256Point.sum(terms)
-print(p.sec().hex())
+# make a lagrange poly with X = {1, 3, 4} for participant 4
+def g(x):
+    participants = [1, 3, 4]
+    x_i = 4
+    product = 1
+    for x_j in participants:
+        if x_j != x_i:
+            product *= (x-x_j) * pow(x_i - x_j, -1, N) % N
+    return product
+print(g(1), g(3), g(4), g(55))
     </code></pre>
   </section>
   <section>
@@ -338,7 +354,7 @@ print(hex(k))
       <li class="fragment">Participant creates the nonce $k_i = l_i + b m_i$ from the nonce coefficient $b = H(S || T || P || z)$
       <li class="fragment">Keyagg coefficient $c_i = H(L || P_i)$ and the challenge $d=H(R,P,z)$ are computed from the signing context
       <li class="fragment">Partial sig is $s_i = k_i + c_i d e_i$ where $e_i$ is the secret
-      <li class="fragment">Coordinator aggregates $s = s_1 + s_2 + ... + s_n$
+      <li class="fragment">Coordinator aggregates $s = s_1 + s_2 + + s_n$
       <li class="fragment">If $R$ is odd, participant uses $N-k_i$ for signing because $-R_i=-k_iG$ and $R=\sum{R_i}$
       <li class="fragment">If $P$ is odd, participant uses $N-e_i$ for signing because $-P_i=-e_iG$ and $P=\sum{c_iP_i}$
     </ul>
@@ -518,7 +534,6 @@ print(context.group_point.verify_schnorr(msg, sig))
       <li>Make this test pass:
         <code>musig:PartialSigTest:test_compute_sig</code>
       <li>Do the same as exercise 16, sign the message "Love thy neighbor", exchange the partial sigs, combine the sigs and verify, but with a merkle root.
-      <li>Generate an address between yourself and your neighbor where the keypath spend is a 2-of-2 MuSig and the ScriptPath spend is also a 2-of-2 MuSig as the only TapScript.
     </ol>
   </section>
 </section>
