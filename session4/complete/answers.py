@@ -4,7 +4,7 @@
 
 #endcode
 #code
->>> # Example MuSig2 Spend
+>>> # Example MuSig2 KeyPath Spend
 >>> from ecc import N, PrivateKey, S256Point
 >>> from musig import KeyAggregator, NoncePublicShare, MuSigParticipant, MuSigCoordinator
 >>> from script import address_to_script_pubkey
@@ -72,8 +72,6 @@ KeyPath spend one of the UTXO to <code>tb1q7kn55vf3mmd40gyj46r245lw87dc6us5n50lr
 >>> ts = TapScript([group_point.xonly(), 0xAC])
 >>> leaf = TapLeaf(ts)
 >>> merkle_root = leaf.hash()
->>> print(group_point.p2tr_address(merkle_root, network="signet"))
-tb1pjp69sgyhqnwhsmrtlxr55fykdk526eu3x5wyvmed0jhjx9jdzq8qr9zgqg
 >>> coor = MuSigCoordinator(pubkeys, merkle_root)
 >>> prev_tx = bytes.fromhex("7b4699e1154a38a63c560216f3481c19e97d4b07aa654f7a205442d7f7937710")  #/prev_tx = bytes.fromhex("<fiil me in>")
 >>> prev_index = 0  #/prev_index = -1  # change me!
@@ -96,10 +94,6 @@ tb1pjp69sgyhqnwhsmrtlxr55fykdk526eu3x5wyvmed0jhjx9jdzq8qr9zgqg
 >>> # print the nonce share serialized in hex for your neighbor
 >>> print(my_nonce_share.serialize().hex())  #/
 03afaedbbd00b36d4d0cb5e12774b3db480daa0089fb328ebc9c57d3b8c3c1322102dda103bd9ea96754e244697c0dcee76254a76b5ebd1c3d26d8374192f7dd489a
->>> neighbor = MuSigParticipant(PrivateKey(21000000))
->>> ns = neighbor.generate_nonce_share(msg=msg, aggregate_pubkey=group_point, rand=b'')
->>> print(ns.serialize().hex())
-02f903cf6bd3481f7061a5f2d3d556e4415df7b8baa732c2224d14320802e4db1f02e5936ece2ad2a75665e8d1e8810089abe821f74faa10dbdc55c8481e2da90449
 >>> # grab your neighbor's nonce
 >>> neighbor_share = NoncePublicShare.parse(bytes.fromhex("02f903cf6bd3481f7061a5f2d3d556e4415df7b8baa732c2224d14320802e4db1f02e5936ece2ad2a75665e8d1e8810089abe821f74faa10dbdc55c8481e2da90449"))  #/neighbor_share = NoncePublicShare.parse(bytes.fromhex("<fill in>"))
 >>> # register both nonces with the coordinator
@@ -107,8 +101,6 @@ tb1pjp69sgyhqnwhsmrtlxr55fykdk526eu3x5wyvmed0jhjx9jdzq8qr9zgqg
 >>> coor.register_nonce_share(neighbor_pubkey.sec(), neighbor_share)  #/
 >>> # create the signing context using the message
 >>> context = coor.create_signing_context(msg)  #/
->>> print(neighbor.sign(context).hex())
-0c97c1ba20e2ff12c940ca341a5947ebb8d3a2454689e6fb52ed49961e6a7c3e
 >>> # create your own partial sig using the context
 >>> my_partial_sig = me.sign(context)  #/
 >>> # register the partial sig with the coordinator
@@ -214,18 +206,21 @@ True
 * Dealer creates a degree $t-1$ polynomial with random coefficients $a_1,...,a_{t-1}$
 * The dealer creates a polynomial $f(x)=e+a_1x+a_2x^2+...+a_{t-1}x^{t-1}$
 * $f(0)=e$ so that's where the secret is
-* Participant $x$ gets dealt $f(x)=y_x$ $\forall{x} \in {1,2,...,n}$
-* $y_x$ is the share of the secret
+* Signer $i$ gets dealt $f(x)=y_i \forall{i} \in {1,2,...,n}$
+* $y_i$ is the share of the secret
 #endmarkdown
 #code
 >>> # Example 3-of-5 Shamir
->>> from frost import PrivatePolynomial
->>> poly = PrivatePolynomial([1000, 2000, 3000])
+>>> from ecc import N
+>>> coefficients = [21000000, 11111111, 2222222]
 >>> shares = {}
 >>> for x in range(1, 6):
-...    shares[x] = poly.y_value(x)
+...    y_value = 0
+...    for i, coef in enumerate(coefficients):
+...        y_value += coef * x ** i % N
+...    shares[x] = y_value % N
 >>> print(shares[5])
-86000
+132111105
 
 #endcode
 #exercise
@@ -233,25 +228,41 @@ True
 Create 7 shares whose threshold is 4
 
 ----
->>> from frost import PrivatePolynomial
->>> poly = PrivatePolynomial([1000, 2000, 3000, 4000])
->>> shares = {x: poly.y_value(x) for x in range(1, 8)}
->>> print(shares[6])
-985000
+>>> from ecc import N
+>>> coefficients = [21000000, 11111111, 2222222, 3333333]
+>>> # initialize the shares dict
+>>> shares = {}  #/
+>>> # loop through 1 to 7 inclusive as the x values
+>>> for x in range(1, 8):  #/
+...    # set the y value to be 0
+...    y_value = 0  #/
+...    # loop through the coefficients with the loop index
+...    for i, coef in enumerate(coefficients):  #/
+...        # add the term coef * x^i to the y value
+...        y_value += coef * x ** i % N  #/
+...    # set the share of x to be the y value mod N
+...    shares[x] = y_value % N  #/
+>>> # print the last share
+>>> print(shares[7])
+1350999874
 
 #endexercise
+#unittest
+frost:PrivatePolynomialTest:test_y_value:
+#endunittest
 #markdown
 # Lagrange Interpolation Polynomial
 * For a participant at $x_i$ where $X = \{x_1, x_2, ... x_t\}$
-* Goal is a $t-1$ degree polynomial $g(x)$ such that: $g(x_i)=1$ and $g(x_j)=0$ where $j\ne i$
-* Note $g(x_j)=0$ if $g(x)=(x-x_j)h(x)$
-* Let $h(x)=\prod_{j \ne i}{(x-x_j)}$
-* Note $h(x)$ is degree $t-1$
-* We note $h(x_i) = \prod_{j \ne i}{(x_i-x_j)}$
-* $g(x) = h(x)/h(x_i)$, $g(x_i)=h(x_i)/h(x_i)=1$ and $g(x_j)=0$ where $j\ne i$
+* Goal is a $t-1$ degree polynomial $g_i(x)$ such that: $g_i(x_i)=1$ and $g_i(x_j)=0$ where $j\ne i$
+* Note $g_i(x_j)=0$ if $g_i(x)=(x-x_j)h(x)$
+* Let $h_i(x)=\prod_{j \ne i}{(x-x_j)}$
+* Note $h_i(x)$ is degree $t-1$
+* We note $h_i(x_i) = \prod_{j \ne i}{(x_i-x_j)}$
+* $g_i(x) = h_i(x)/h_i(x_i)$, $g_i(x_i)=h_i(x_i)/h_i(x_i)=1$ and $g_i(x_j)=0$ where $j\ne i$
 #endmarkdown
 #code
->>> # make a lagrange poly with X = {1, 3, 4} for participant 4
+>>> from ecc import N
+>>> # Example LaGrange polynomial with X = {1, 3, 4} for participant 4
 >>> def g(x):
 ...     participants = [1, 3, 4]
 ...     x_i = 4
@@ -266,268 +277,205 @@ Create 7 shares whose threshold is 4
 #endcode
 #exercise
 
-Create a BIP327 group public key with these public keys:
-
-* 034a5169f673aa632f538aaa128b6348536db2b637fd89073d49b6a23879cdb3ad
-* 0225fa6a4190ddc87d9f9dd986726cafb901e15c21aafd2ed729efed1200c73de8
-* 03ed214e8ce499d92a2085e7e6041b4f081c7d29d8770057fc705a131d2918fcdb
-* 02609ae8d31e3b290e74483776c1c8dfc2756b87d9635d654eb9e1ca95c228b169
-* 02ffe558e388852f0120e46af2d1b370f85854a8eb0841811ece0e3e03d282d57c
-* 02d42d696f2c343dc67d80fcd85dbbdb2edef3cac71126625d0cbcacc231a00015
+Create a LaGrange polynomial of degree 4 where $X=\{2,5,8,9\}$ for participant 8 and determine the value at $g(0)$
 
 ----
->>> from ecc import S256Point
->>> from hash import hash_keyagglist, hash_keyaggcoef
->>> from helper import big_endian_to_int
->>> raw_pubkeys = ["034a5169f673aa632f538aaa128b6348536db2b637fd89073d49b6a23879cdb3ad", "0225fa6a4190ddc87d9f9dd986726cafb901e15c21aafd2ed729efed1200c73de8", "03ed214e8ce499d92a2085e7e6041b4f081c7d29d8770057fc705a131d2918fcdb", "02609ae8d31e3b290e74483776c1c8dfc2756b87d9635d654eb9e1ca95c228b169", "02ffe558e388852f0120e46af2d1b370f85854a8eb0841811ece0e3e03d282d57c", "02d42d696f2c343dc67d80fcd85dbbdb2edef3cac71126625d0cbcacc231a00015"]
->>> # create the pubkeys using S256Point.parse
->>> pubkeys = [S256Point.parse(bytes.fromhex(s)) for s in raw_pubkeys]  #/
->>> # make the group commitment
->>> preimage = b""  #/
->>> # loop through the pubkeys
->>> for pubkey in pubkeys:  #/
-...     preimage += pubkey.sec()  #/
->>> group_commitment = hash_keyagglist(preimage)  #/
->>> # create a list for the terms that will get summed
->>> terms = []  #/
->>> # initialize the second poinnt with None
->>> second_point = None  #/
->>> # loop through the pubkeysa
->>> for p_i in pubkeys:  #/
-...     # if the second point is None and the pubkey is not the first one
-...     if second_point is None and p_i != pubkeys[0]:  #/
-...         # then designate the second point to be this pubkey
-...         second_point = p_i  #/
-...     # if the current pubkey is the second point, c_i is 1
-...     if p_i == second_point:  #/
-...         c_i = 1  #/
-...     # otherwise
-...     else:  #/
-...         # calculate the hash of the group commitment and the sec
-...         h = hash_keyaggcoef(group_commitment + p_i.sec())  #/
-...         # convert the hash to an integer
-...         c_i = big_endian_to_int(h)  #/
-...     # add the coefficient * pubkey to the list of terms
-...     terms.append(c_i * p_i)  #/
->>> # the group pubkey is the sum of the terms
->>> p = S256Point.sum(terms)  #/
->>> # print the group pubkey's sec in hex
->>> print(p.sec().hex())
-03628b3911ec6818290dbc40e0039652ceac6bef4355c6b461af870d0aafa123a0
-
-#endexercise
-#unittest
-musig:KeyAggTest:test_compute_group_commitment:
-#endunittest
-#unittest
-musig:KeyAggTest:test_compute_group_point:
-#endunittest
-#exercise
-
-Create a 2-of-2 BIP327 public key sharing a key with your neighbor.
-
-----
->>> from ecc import S256Point
->>> from musig import KeyAggregator
->>> # insert your and someone else's sec pubkeys here
->>> raw_pubkeys = ["03cd04c1bf88ca891af152fc57c36523ab59efb16b7ec07caca0cfc4a1f2051d9e", "03334104808fc821c1ba4e933d6ecce6d1f409ce324889cdc0131c03d0e9840a8c"]  #/raw_pubkeys = ["<my pubkey in compressed sec>", "<my neighbor's pubkey in compressed sec>"]
->>> # create the pubkeys using S256Point.parse
->>> pubkeys = [S256Point.parse(bytes.fromhex(s)) for s in raw_pubkeys]  #/
->>> # create the keyaggcontext
->>> keyagg = KeyAggregator(pubkeys)  #/
->>> # now print the group point's sec in hex
->>> print(keyagg.group_point.sec().hex())  #/
-031d087fbb722f28e82ad0560ec0223253c2c63fee1bd057692b167bb689fa1dbb
+>>> from ecc import N
+>>> def g(x):
+...     participants = [2, 5, 8, 9]
+...     x_i = 8
+...     product = 1
+...     for x_j in participants:
+...         if x_j != x_i:
+...             product *= (x-x_j) * pow(x_i - x_j, -1, N) % N
+...     return product % N
+>>> print(g(2), g(5), g(8), g(9), g(0))
+0 0 1 0 5
 
 #endexercise
 #markdown
-# MuSig2 Nonce Creation
-* Every participant creates a private nonce share (numbers $l_i$ and $m_i$) and communicates the nonce share points to the coordinator ($l_i * G=S_i, m_i * G=T_i$)
-* When the nonce share points are gathered, the coordinator communicates nonce point sums to each participant. $S = S_1+S_2+...+S_n, T=T_1+T_2+...+T_n$ along with the message being signed and the key aggregation data.
-* The nonce coefficient is $b = \mathcal{H}(S || T || P || z)$ where $P$ is the group point and $z$ is the message being signed
-* The nonce point for the signature $R = S + b * T$
-* The same nonce coefficient ($b$) can now be used to determine each participant's nonce ($k$) $k_i = l_i + b * m_i$
+# Using LaGrange
+* $g_i(x)$ is degree $t-1$ where $g_i(x_i)=1$ and $g_i(x_j)=0$ where $j\ne i$
+* Let $h_i(x)=y_ig_i(x)$ notice $h_i(x_i)=y_i$ and $h_i(x_j)=0$ when $j\ne i$
+* In other words, $h_i(x)$ is degree $t-1$ and hits the point $(x_i,y_i)$
+* Let $h(x)=\sum{h_i(x)}$. We know $h(x_j)=y_j$ because $h_i(x_j)=0$ except $h_j(x_j)=y_j$
+* $h(x_i)=y_i \forall x_i \in X$, hitting $t$ points.
+* Those points define the same polynomial $h(x)=f(x)$ where $f(x)$ is the dealer's original polynoomial
+* Since $f(0)=e$, $h(0)=\sum{h_i(0)}$ meaning we can recover the secret through participant shares and Lagrange Interpolation Polynomials.
 #endmarkdown
 #code
->>> # Example nonce generation
->>> from ecc import N, PrivateKey
->>> from hash import hash_musignoncecoef
->>> from musig import KeyAggregator, MuSigParticipant, MuSigCoordinator
->>> msg = b"MuSig2 is awesome!"
->>> participants = [MuSigParticipant(PrivateKey(i * 1000)) for i in range(1, 7)]
->>> pubkeys = [p.point for p in participants]
->>> coor = MuSigCoordinator(pubkeys)
->>> for p in participants:
-...     nonce_share = p.generate_nonce_share(rand=b'')
-...     coor.register_nonce_share(p.point.sec(), nonce_share)
->>> group_point = coor.keyagg.group_point
->>> s = S256Point.sum([n.s for n in coor.nonce_shares.values()])
->>> t = S256Point.sum([n.t for n in coor.nonce_shares.values()])
->>> h = hash_musignoncecoef(s.sec()+t.sec()+group_point.xonly()+msg)
->>> b = big_endian_to_int(h)
->>> r = s + b*t
->>> print(r.sec().hex())
-038f12dde9f661cdd1d655a6fa8ac600de344550a1d70f1c0f5376e2600fa94a6b
->>> k = (participants[0].private_share.l + b * participants[0].private_share.m) % N
->>> print(hex(k))
-0xb17767a513f759bda07c356a8292cb41d05ca7aaecdaeb6d3067be2d4386a5df
+>>> # example of recovering the secret
+>>> from ecc import N
+>>> participants = [1, 3, 4]
+>>> share_1 = 0xd40aba11bbfdda09607aa1663606e170c57d312fe30be51797b79248fd18ce02
+>>> share_3 = 0xb4e3bfec8f3d1404a5eba45ed4052cf1aba29f351d6a73cb3c5437dff82b834
+>>> share_4 = 0x4d34c2c9f899ad5db275f0af4d20a1ab43d68d5d6b8be375d69b7fe6b3b7d494
+>>> g_1, g_3, g_4 = 1, 1, 1
+>>> for x_j in participants:
+...     if x_j != 1:
+...         g_1 *= (-x_j) * pow(1-x_j, -1, N) % N
+...     if x_j != 3:
+...         g_3 *= (-x_j) * pow(3-x_j, -1, N) % N
+...     if x_j != 4:
+...         g_4 *= (-x_j) * pow(4-x_j, -1, N) % N
+>>> secret = (g_1*share_1 + g_3*share_3 + g_4*share_4) % N
+>>> print(hex(secret))
+0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
 
 #endcode
 #exercise
 
-Calculate the k for participant 1:
+Participants are $X=\{1,3,5,6\}$
+Participant 1 has $y_1=1913$
+Participant 3 has $y_3=1971$
+Participant 5 has $y_5=2009$
+Participant 6 has $y_6=2024$
 
-Participant 1's secret: 1000
-Participant 2's secret: 2000
-
-message: b"Hello World!"
-
-Participant 1's $l$ and $m$: 3000, 4000
-Participant 2's $l$ and $m$: 5000, 6000
+Recover the secret
 
 ----
->>> from ecc import N, PrivateKey
->>> from hash import hash_musignoncecoef
->>> from helper import big_endian_to_int
->>> from musig import KeyAggregator, NoncePrivateShare, MuSigParticipant, MuSigCoordinator
->>> participant_1 = MuSigParticipant(PrivateKey(1000))
->>> participant_2 = MuSigParticipant(PrivateKey(2000))
->>> z = b"Hello World!"
->>> nonce_share_1 = NoncePrivateShare(3000, 4000, participant_1.point)
->>> nonce_share_2 = NoncePrivateShare(5000, 6000, participant_2.point)
->>> pubkeys = [participant_1.point, participant_2.point]
->>> coor = MuSigCoordinator(pubkeys)
->>> coor.register_nonce_share(participant_1.point.sec(), nonce_share_1.public_share)
->>> coor.register_nonce_share(participant_2.point.sec(), nonce_share_2.public_share)
->>> # grab the group point, p, from coordinator's group_point
->>> p = coor.group_point  #/
->>> # calculate s and t by summing the s and t properties from the nonce_shares.values()
->>> s = S256Point.sum([n.s for n in coor.nonce_shares.values()])  #/
->>> t = S256Point.sum([n.t for n in coor.nonce_shares.values()])  #/
->>> # calculate the hash of s's sec, t's sec, p's xonly and the message, z
->>> h = hash_musignoncecoef(s.sec() + t.sec() + p.xonly() + z)  #/
->>> # the nonce coefficient, b, is the hash interpreted as a big endian integer
->>> b = big_endian_to_int(h)  #/
->>> # the r=S+bT
->>> r = s + b*t  #/
->>> # print the nonce point's sec in hex
->>> print(r.sec().hex())  #/
-0254d698964537d2f322797ef5f38307516789b22f27da7d5e6855447ea2b50aff
->>> # k=l+bm (l and m are properties of nonce_share_1) make sure to mod by N
->>> k = (nonce_share_1.l + b * nonce_share_1.m) % N  #/
->>> # print the hex of k
->>> print(hex(k))  #/
-0xab2527543594209be30a92c94a01754bdf1a10b7ca2084b2b188f712c73e66a0
+>>> # example of recovering the secret
+>>> from ecc import N
+>>> from secrets import randbelow
+>>> from frost import lagrange_coef
+>>> participants = [1, 3, 5, 6]
+>>> share_1 = 1913
+>>> share_3 = 1971
+>>> share_5 = 2009
+>>> share_6 = 2024
+>>> # initialize the LaGrange values
+>>> g_1, g_3, g_5, g_6 = 1, 1, 1, 1  #/
+>>> # loop through the participants
+>>> for x_j in participants:  #/
+...     # g_i = Π(-x_j)/(x_i-x_j) for all i != j
+...     if x_j != 1:  #/
+...         g_1 *= (-x_j) * pow(1-x_j, -1, N) % N  #/
+...     if x_j != 3:  #/
+...         g_3 *= (-x_j) * pow(3-x_j, -1, N) % N  #/
+...     if x_j != 5:  #/
+...         g_5 *= (-x_j) * pow(5-x_j, -1, N) % N  #/
+...     if x_j != 6:  #/
+...         g_6 *= (-x_j) * pow(6-x_j, -1, N) % N  #/
+>>> # calculate the secret by multiplying the value at 0 by the share for each share
+>>> secret = (g_1*share_1 + g_3*share_3 + g_5*share_5 + g_6*share_6) % N  #/
+>>> # print the secret in hex
+>>> print(hex(secret))  #/
+0x751
 
 #endexercise
 #unittest
-musig:NonceAggTest:test_compute_nonce_point:
+frost:LaGrangeTest:test_lagrange:
 #endunittest
-#exercise
-
-Create a nonce point and nonce coefficient with your neighbor for this message: b"Love thy neighbor"
-
-----
->>> from ecc import N, PrivateKey
->>> from hash import hash_musignoncecoef
->>> from helper import big_endian_to_int, sha256
->>> from musig import NoncePrivateShare, NoncePublicShare, MuSigParticipant, MuSigCoordinator
->>> msg = b"Love thy neighbor"
->>> my_secret = big_endian_to_int(sha256(b"jimmy@programmingblockchain.com"))  #/my_secret = big_endian_to_int(sha256(b"<my email address>"))
->>> me = MuSigParticipant(PrivateKey(my_secret))
->>> neighbor_pubkey = S256Point.parse(bytes.fromhex("02e79c4eb45764bd015542f6779cc70fef44b7a2432f839264768288efab886291"))  #/neighbor_pubkey = S256Point.parse(bytes.fromhex("<my neighbor's sec pubkey>"))
->>> # create the coordinator with me and my neighbor
->>> coor = MuSigCoordinator([me.point, neighbor_pubkey])  #/
->>> # generate my nonce share using generate_nonce_share
->>> my_nonce_share = me.generate_nonce_share(rand=b'')  #/
->>> # print the nonce share's serialization in hex and share with your neighbor
->>> print(my_nonce_share.serialize().hex())  #/
-02ed93c7309ac71a5eca7ba626b373ce20f4040643b0ff3dd8702eddbe76aa9d7d03c58cad4713bd31c475b7cad30f4feb619233fb5c82cb464b20667e627cdac491
->>> neighbor_share = NoncePublicShare.parse(bytes.fromhex("03b8e4c988117005dce2e1fcb4216fa642cb6d78f591f9caca6763aaf751dba6c8036314b285c9d8c585ca40e9c916724f63bca66e6287bafd9ff386f11b142ecad7"))  #/ neighbor_share = NoncePublicShare.parse(bytes.fromhex("<fill in with your neighbor's hex public nonce share>"))
->>> # register my nonce share to the coordinator
->>> coor.register_nonce_share(me.point.sec(), my_nonce_share)  #/
->>> # register neighbor's share to the coordinator
->>> coor.register_nonce_share(neighbor_pubkey.sec(), neighbor_share)  #/
->>> # compute the nonce point from the coordinator
->>> r = coor.compute_nonce_point(msg)  #/
->>> # print the sec format in hex of the nonce point
->>> print(r.sec().hex())  #/
-03412e4d8e337549adff12d2d24f5caeb7911bbe1ea98c6573ff382d7305f4ba64
-
-#endexercise
 #markdown
-# MuSig2 Partial Signatures
-* Every participant calculates $k_i=l_i+b m_i$ using the nonce coefficient $b= \mathcal{H}(S||T||P||z)$
-* They also need the keyagg coefficient $c_i = \mathcal{H}(L || P_i)$ and the challenge $d=\mathcal{H}(R,P,z)$ where $z$ is the message)
-* The partial signature can then be calculated $s_i = k_i + c_i * d * e_i$ where $e_i$ is the secret
-* The sum of the partial signatures is the s part of the Schnorr Signature $s=s_1+s_2+...+s_n$
-* If $R$ is odd, we use $-k_i$ for the signing. Similarly, if $P$ is odd, we use $-e_i$ for signing
+# Dealer Key Generation
+* Exactly as Shamir Secret Sharing, a private polynomial $f(x)=e+a_1x+a_2x^2...a_{t-1}x^{t-1}$ where secret is $e$ and $a_i$ is random
+* $y$ values at each $x$ is distributed as shares to signers
+* We create a public polynomial $F(x)$ which is $f(x)$ multiplied by $G$, $F(x)=f(x)G$ $F(x)=eG+a_1xG+a_2x^2G+...+a_{t-1}x^{t-1}G$
+* Note $F(x)=P+xA_1+x^2A_2+...+x^{t-1}A_{t-1}$ where $a_iG=A_i$. Note $F(0)=P$
+* $F(x)$ is a public polynomial to the signers
+* Each signer once receiving the secret $y_i=f(x_i)$, verifies by checking $y_iG=F(x_i)$
+* This $y_iG=F(x_i)=P_i$ is public.
 #endmarkdown
 #code
->>> from ecc import N, PrivateKey
->>> from musig import SigningContext, MuSigParticipant, MuSigCoordinator
->>> participant_1 = MuSigParticipant(PrivateKey(1000))
->>> participant_2 = MuSigParticipant(PrivateKey(2000))
->>> msg = b"Hello World!"
->>> nonce_share_1 = NoncePrivateShare(3000, 4000, participant_1.point)
->>> nonce_share_2 = NoncePrivateShare(5000, 6000, participant_2.point)
->>> participant_1.private_share = nonce_share_1
->>> participant_2.private_share = nonce_share_2
->>> pubkeys = [participant_1.point, participant_2.point]
->>> coor = MuSigCoordinator(pubkeys)
->>> coor.register_nonce_share(participant_1.point.sec(), nonce_share_1.public_share)
->>> coor.register_nonce_share(participant_2.point.sec(), nonce_share_2.public_share)
+>>> # Example of creating 3-of-5 FrostSigners
+>>> from frost import Dealer, FrostSigner
+>>> dealer = Dealer([21000000, 2000, 3000])
+>>> signer_1 = FrostSigner(1, dealer.y_value(1), dealer.public_polynomial)
+>>> print(signer_1.point.sec().hex())
+02239ebf39e132124de2f7b16de42f8c277d0e7709e2639742348102303243c417
+
+#endcode
+#exercise
+
+Make 7 FrostSigners whose threshold is 4.
+
+----
+>>> from frost import Dealer, FrostSigner
+>>> # use the generate classmethod from Dealer to create a dealer of threshold 4
+>>> dealer = Dealer.generate(4)  #/
+>>> # make a list of signers whose x's are 1,2,3,...7
+>>> signers = [FrostSigner(x, dealer.y_value(x), dealer.public_polynomial) or x in range(1, 8)]  #/
+>>> # print the first signer's t
+>>> print(signers[0].t)  #/
+4
+
+#endexercise
+#unittest
+frost:DealerTest:test_create_signer:
+#endunittest
+#markdown
+# Partial Sig Verification
+* Nonce point is $R=S+bT$ where $b=\mathcal{H}(S||T||P||z)$
+* Participant creates the nonce $k_i = l_i + b m_i$
+* LaGrange coefficient $c_i = g_i(0)$ and challenge $d=\mathcal{H}(R,P,z)$ come from the signing context
+* Partial sig is $s_i = k_i + c_i d y_i$ where $y_i$ is the participant's secret/$y$-value
+* If $R$ is odd, participant uses $N-k_i$ for signing because $-R_i=-k_iG$ and $R=\sum{R_i}$
+* If $P$ is odd, participant uses $N-e_i$ for signing because $-P_i=-e_iG$ and $P=\sum{c_iP_i}$
+#code
+>>> # Example Partial Sig Generation
+>>> from ecc import N
+>>> from frost import Dealer, FrostSigner, FrostCoordinator, lagrange_coef
+>>> from helper import int_to_big_endian
+>>> msg = b"FROST is awesome!"
+>>> dealer = Dealer([21000000, 9999999, 9998888, 8887777])
+>>> signers = {x: dealer.create_signer(x) for x in range(1, 7)}
+>>> participants = [1, 4, 5, 6]
+>>> coor = FrostCoordinator(participants, dealer.public_polynomial)
+>>> for x in participants:
+...     p = signers[x]
+...     nonce_share = p.generate_nonce_share(msg=msg, rand=b'')
+...     coor.register_nonce_share(x, nonce_share)
 >>> context = coor.create_signing_context(msg)
 >>> if context.nonce_point.even:
-...     k = participant_1.nonce(context.nonce_coef())
+...     k = signers[1].nonce(context.nonce_coef)
 ... else:
-...     k = N - participant_1.nonce(context.nonce_coef())
+...     k = N - signers[1].nonce(context.nonce_coef)
 >>> if context.group_point.even:
-...     e = participant_1.private_key.secret
+...     e = signers[1].private_key.secret
 ... else:
-...     e = N - participant_1.private_key.secret
->>> c = context.keyagg_coef(participant_1.point)
+...     e = N - signers[1].private_key.secret
+>>> c = lagrange_coef(participants, 1)
 >>> d = context.challenge()
 >>> s = (k + c * d * e) % N
 >>> print(hex(s))
-0x1aad95d9490e4b8599377ff6a546a1d075fb4242c749dbcbc010589e23c21776
+0x32ec8d7a6b941b80bdf97deb231a9710583e6656e32e69e7aabf00e6e81153fb
 
 #endcode
 #markdown
-# MuSig2 Partial Signature Verification
-* To verify a partial signature, we need some data from the coordinator: group commitment, message being signed, aggregate nonce point and aggregate pubkey
-* We also need the participant nonce point and pubkey.
-* $c_i$ is the aggregate key coefficient $\mathcal{H}(L||P_i)$ and $d$ is group commitment $\mathcal{H}(R||P||z)$
-* $s_i=k_i+c_i d e_i$ so what we check is $s_i G=k_iG+c_i d e_i G=R_i+c_i d P_i$ or $R=s_i G-c_i d P_i$
+# Partial Sig Verification
+* To verify a partial signature, we need from the coordinator: message $z$, nonce point $R$, participants
+* We need from the participant nonce point $R_i$ and pubkey $P_i$
+* We use these to calculate LaGrange coefficient $c_i=g_i(0)$ and challenge $d=H(R || P || z)$
+* $s_i=k_i+c_i d y_i$ so what we check is $s_i G=k_iG+c_i d y_i G=R_i+c_i d P_i$ or $R=s_i G-c_i d P_i$
 #endmarkdown
 #code
->>> # example of verifying a partial signature
->>> from ecc import G, N, PrivateKey
->>> from musig import SigningContext, MuSigParticipant, MuSigCoordinator
->>> participant_1 = MuSigParticipant(PrivateKey(1000))
->>> participant_2 = MuSigParticipant(PrivateKey(2000))
->>> msg = b"Hello World!"
->>> nonce_share_1 = NoncePrivateShare(3000, 4000, participant_1.point)
->>> nonce_share_2 = NoncePrivateShare(5000, 6000, participant_2.point)
->>> participant_1.private_share = nonce_share_1
->>> participant_2.private_share = nonce_share_2
->>> pubkeys = [participant_1.point, participant_2.point]
->>> coor = MuSigCoordinator(pubkeys)
->>> coor.register_nonce_share(participant_1.point.sec(), nonce_share_1.public_share)
->>> coor.register_nonce_share(participant_2.point.sec(), nonce_share_2.public_share)
+>>> # Example Partial Sig Verification
+>>> from ecc import N, G
+>>> from frost import Dealer, FrostSigner, FrostCoordinator, lagrange_coef
+>>> from helper import int_to_big_endian
+>>> msg = b"FROST is awesome!"
+>>> dealer = Dealer([21000000, 9999999, 9998888, 8887777])
+>>> signers = {x: dealer.create_signer(x) for x in range(1, 7)}
+>>> participants = [1, 4, 5, 6]
+>>> coor = FrostCoordinator(participants, dealer.public_polynomial)
+>>> for x in participants:
+...     p = signers[x]
+...     nonce_share = p.generate_nonce_share(msg=msg, rand=b'')
+...     coor.register_nonce_share(x, nonce_share)
 >>> context = coor.create_signing_context(msg)
->>> s = 0x1aad95d9490e4b8599377ff6a546a1d075fb4242c749dbcbc010589e23c21776
+>>> nonce_public_share = coor.nonce_shares[1]
+>>> partial_sig = bytes.fromhex("32ec8d7a6b941b80bdf97deb231a9710583e6656e32e69e7aabf00e6e81153fb")
 >>> if context.nonce_point.even:
-...     r = nonce_share_1.public_share.nonce_point(context.nonce_coef())
+...     r = nonce_public_share.nonce_point(context.nonce_coef)
 ... else:
-...     r = -1 * nonce_share_1.public_share.nonce_point(context.nonce_coef())
+...     r = -1 * nonce_public_share.nonce_point(context.nonce_coef)
 >>> if context.group_point.even:
-...     p = participant_1.point
+...     p = signers[1].point
 ... else:
-...     p = -1 * participant_1.point
->>> c = context.keyagg_coef(participant_1.point)
+...     p = -1 * signers[1].point
+>>> c = lagrange_coef(participants, 1)
 >>> d = context.challenge()
->>> print(s * G == r + c * d * p)
+>>> print(s * G == (r + c * d * p))
 True
 
 #endcode
@@ -535,8 +483,7 @@ True
 
 Calculate the partial signature for participant 2:
 
-Participant 1's secret: 1000
-Participant 2's secret: 2000
+Dealer Coefficients = [12345, 67890]
 
 message: b"Hello World!"
 
@@ -545,39 +492,41 @@ Participant 2's $l$ and $m$: 5000, 6000
 
 ----
 >>> from ecc import N, PrivateKey
->>> from musig import SigningContext, MuSigParticipant, MuSigCoordinator
->>> participant_1 = MuSigParticipant(PrivateKey(1000))
->>> participant_2 = MuSigParticipant(PrivateKey(2000))
+>>> from frost import Dealer, FrostSigner, FrostCoordinator, lagrange_coef, NoncePrivateShare
+>>> dealer = Dealer([12345, 67890])
 >>> msg = b"Hello World!"
+>>> signers = {x: dealer.create_signer(x) for x in range(1, 4)}
+>>> participants = [1, 2]
+>>> coor = FrostCoordinator(participants, dealer.public_polynomial)
+>>> participant_1 = signers[1]
+>>> participant_2 = signers[2]
 >>> nonce_share_1 = NoncePrivateShare(3000, 4000, participant_1.point)
 >>> nonce_share_2 = NoncePrivateShare(5000, 6000, participant_2.point)
->>> participant_1.private_share = nonce_share_1
->>> participant_2.private_share = nonce_share_2
->>> pubkeys = [participant_1.point, participant_2.point]
->>> coor = MuSigCoordinator(pubkeys)
->>> coor.register_nonce_share(participant_1.point.sec(), nonce_share_1.public_share)
->>> coor.register_nonce_share(participant_2.point.sec(), nonce_share_2.public_share)
+>>> participant_1.private_nonce_share = nonce_share_1
+>>> participant_2.private_nonce_share = nonce_share_2
+>>> coor.register_nonce_share(1, nonce_share_1.public_share)
+>>> coor.register_nonce_share(2, nonce_share_2.public_share)
 >>> # create the signing context, which should aggregate the points
 >>> context = coor.create_signing_context(msg)  #/
->>> # determine the first participant's nonce (k_i) from the nonce point's evenness
+>>> # determine the second participant's nonce (k_i) from the nonce point's evenness
 >>> if context.nonce_point.even:  #/
-...     k = participant_2.nonce(context.nonce_coef())  #/
+...     k = participant_2.nonce(context.nonce_coef)  #/
 ... else:  #/
-...     k = N - participant_2.nonce(context.nonce_coef())  #/
->>> # determine the first participant's secret (e_i) from the group point's evenness
+...     k = N - participant_2.nonce(context.nonce_coef)  #/
+>>> # determine the second participant's secret (y_i) from the group point's evenness
 >>> if context.group_point.even:  #/
-...     e = participant_2.private_key.secret  #/
+...     y = participant_2.private_key.secret  #/
 ... else:  #/
-...     e = N - participant_2.private_key.secret  #/
->>> # use the context's keylagg_coef method to get the keyagg coefficient (c_i = H(L||P_i))
->>> c = context.keyagg_coef(participant_2.point)  #/
+...     y = N - participant_2.private_key.secret  #/
+>>> # use the lagrange_coef function to get the lagrange coefficient (c_i = g_i(x_i))
+>>> c = lagrange_coef(participants, 2)
 >>> # use the context's challenge method to get the group challenge (d = H(R||P||z))
 >>> d = context.challenge()  #/
->>> # now get the partial signature s_i = k + c_i * d * e_i
->>> s = (k + c * d * e) % N  #/
+>>> # now get the partial signature s_i = k + c_i * d * y_i
+>>> s = (k + c * d * y) % N  #/
 >>> # print the hex of the partial signature
 >>> print(hex(s))  #/
-0x9d4815237aa9e06f5ae095bef95898c584f835c9df0389ad46e1f94c8034b621
+0x82f5ea3360c82882a851abf95324d079392fd0c70d7e56a15e0aa8e5c3fb983f
 
 #endexercise
 #exercise
@@ -585,35 +534,37 @@ Participant 2's $l$ and $m$: 5000, 6000
 Verify the partial signature for participant 2
 
 ----
->>> from ecc import G, N, PrivateKey
->>> from musig import SigningContext, MuSigParticipant, MuSigCoordinator
->>> participant_1 = MuSigParticipant(PrivateKey(1000))
->>> participant_2 = MuSigParticipant(PrivateKey(2000))
+>>> from ecc import N, PrivateKey
+>>> from frost import Dealer, FrostSigner, FrostCoordinator, lagrange_coef, NoncePrivateShare
+>>> dealer = Dealer([12345, 67890])
 >>> msg = b"Hello World!"
->>> nonce_share_1 = NoncePrivateShare(3000, 4000, participant_1.point)
->>> nonce_share_2 = NoncePrivateShare(5000, 6000, participant_2.point)
->>> participant_1.private_share = nonce_share_1
->>> participant_2.private_share = nonce_share_2
->>> pubkeys = [participant_1.point, participant_2.point]
->>> coor = MuSigCoordinator(pubkeys)
->>> coor.register_nonce_share(participant_1.point.sec(), nonce_share_1.public_share)
->>> coor.register_nonce_share(participant_2.point.sec(), nonce_share_2.public_share)
+>>> signers = {x: dealer.create_signer(x) for x in range(1, 4)}
+>>> participants = [1, 2]
+>>> coor = FrostCoordinator(participants, dealer.public_polynomial)
+>>> participant_1 = signers[1]
+>>> participant_2 = signers[2]
+>>> raw_nonce_1 = bytes.fromhex("03ed214e8ce499d92a2085e7e6041b4f081c7d29d8770057fc705a131d2918fcdb02609ae8d31e3b290e74483776c1c8dfc2756b87d9635d654eb9e1ca95c228b169")
+>>> raw_nonce_2 = bytes.fromhex("02ffe558e388852f0120e46af2d1b370f85854a8eb0841811ece0e3e03d282d57c02d42d696f2c343dc67d80fcd85dbbdb2edef3cac71126625d0cbcacc231a00015")
+>>> nonce_share_1 = NoncePublicShare.parse(raw_nonce_1)
+>>> nonce_share_2 = NoncePublicShare.parse(raw_nonce_2)
+>>> coor.register_nonce_share(1, nonce_share_1)
+>>> coor.register_nonce_share(2, nonce_share_2)
 >>> # fill in what s equals from the last exercise
->>> s = 0x9d4815237aa9e06f5ae095bef95898c584f835c9df0389ad46e1f94c8034b621  #/
+>>> s = 0x82f5ea3360c82882a851abf95324d079392fd0c70d7e56a15e0aa8e5c3fb983f  #/
 >>> # create the signing context, which should aggregate the points
 >>> context = coor.create_signing_context(msg)  #/
 >>> # determine the second participant's nonce point (R_i) from the nonce point's evenness
 >>> if context.nonce_point.even:  #/
-...     r = nonce_share_2.public_share.nonce_point(context.nonce_coef())  #/
+...     r = nonce_share_2.nonce_point(context.nonce_coef)  #/
 ... else:  #/
-...     r = -1 * nonce_share_2.public_share.nonce_point(context.nonce_coef())  #/
+...     r = -1 * nonce_share_2.nonce_point(context.nonce_coef)  #/
 >>> # determine the second participant's pubkey (P_i) from the group point's evenness
 >>> if context.group_point.even:  #/
 ...     p = participant_2.point  #/
 ... else:  #/
 ...     p = -1 * participant_2.point  #/
->>> # get the keyagg coefficient (c) for the second participant
->>> c = context.keyagg_coef(participant_2.point)  #/
+>>> # get the LaGrange coefficient (c_i) for the second participant
+>>> c = lagrange_coef(participants, 2)  #/
 >>> # get the challenge for the group (d)
 >>> d = context.challenge()  #/
 >>> # check if s_i * G == R + c * d * P
@@ -626,22 +577,24 @@ True
 Sum the partial signatures, create a Schnorr Signature and verify it using the group point
 
 ----
->>> from ecc import G, N, PrivateKey, SchnorrSignature
->>> from musig import SigningContext, MuSigParticipant, MuSigCoordinator
->>> participant_1 = MuSigParticipant(PrivateKey(1000))
->>> participant_2 = MuSigParticipant(PrivateKey(2000))
+>>> from ecc import N, PrivateKey, SchnorrSignature
+>>> from frost import Dealer, FrostSigner, FrostCoordinator, lagrange_coef, NoncePrivateShare
+>>> dealer = Dealer([12345, 67890])
 >>> msg = b"Hello World!"
->>> nonce_share_1 = NoncePrivateShare(3000, 4000, participant_1.point)
->>> nonce_share_2 = NoncePrivateShare(5000, 6000, participant_2.point)
->>> participant_1.private_share = nonce_share_1
->>> participant_2.private_share = nonce_share_2
->>> pubkeys = [participant_1.point, participant_2.point]
->>> coor = MuSigCoordinator(pubkeys)
->>> coor.register_nonce_share(participant_1.point.sec(), nonce_share_1.public_share)
->>> coor.register_nonce_share(participant_2.point.sec(), nonce_share_2.public_share)
+>>> signers = {x: dealer.create_signer(x) for x in range(1, 4)}
+>>> participants = [1, 2]
+>>> coor = FrostCoordinator(participants, dealer.public_polynomial)
+>>> participant_1 = signers[1]
+>>> participant_2 = signers[2]
+>>> raw_nonce_1 = bytes.fromhex("03ed214e8ce499d92a2085e7e6041b4f081c7d29d8770057fc705a131d2918fcdb02609ae8d31e3b290e74483776c1c8dfc2756b87d9635d654eb9e1ca95c228b169")
+>>> raw_nonce_2 = bytes.fromhex("02ffe558e388852f0120e46af2d1b370f85854a8eb0841811ece0e3e03d282d57c02d42d696f2c343dc67d80fcd85dbbdb2edef3cac71126625d0cbcacc231a00015")
+>>> nonce_share_1 = NoncePublicShare.parse(raw_nonce_1)
+>>> nonce_share_2 = NoncePublicShare.parse(raw_nonce_2)
+>>> coor.register_nonce_share(1, nonce_share_1)
+>>> coor.register_nonce_share(2, nonce_share_2)
 >>> context = coor.create_signing_context(msg)
->>> s_1 = 0x1aad95d9490e4b8599377ff6a546a1d075fb4242c749dbcbc010589e23c21776
->>> s_2 = 0x9d4815237aa9e06f5ae095bef95898c584f835c9df0389ad46e1f94c8034b621
+>>> s_1 = 0xa9752dd83e4714576d301274b89ba1042df1c666c4db491b9ba8fb70aaaadc1f
+>>> s_2 = 0x82f5ea3360c82882a851abf95324d079392fd0c70d7e56a15e0aa8e5c3fb983f
 >>> # sum the two partial sigs and mod by N
 >>> s = (s_1 + s_2) % N  #/
 >>> # get the nonce point from the context
@@ -649,81 +602,38 @@ Sum the partial signatures, create a Schnorr Signature and verify it using the g
 >>> # create the Schnorr Signature using the r and the s
 >>> sig = SchnorrSignature(r, s)  #/
 >>> # check the validity of the schnorr signature using the group point from the context
->>> print(context.group_point.verify_schnorr(msg, sig))  #/
+>>> print(coor.group_point.verify_schnorr(msg, sig))  #/
 True
 
 #endexercise
 #unittest
-musig:PartialSigTest:test_verify:
+frost:PartialSigTest:test_verify:
 #endunittest
 #unittest
-musig:PartialSigTest:test_sign:
+frost:PartialSigTest:test_sign:
 #endunittest
-#exercise
-
-Trade partial signatures with your neighbor and verify for the message from Exercise 10. 
-
-----
->>> from ecc import N, PrivateKey
->>> from hash import hash_musignoncecoef
->>> from helper import big_endian_to_int, sha256
->>> from musig import NoncePrivateShare, NoncePublicShare, MuSigParticipant, MuSigCoordinator
->>> msg = b"Love thy neighbor"
->>> my_secret = big_endian_to_int(sha256(b"jimmy@programmingblockchain.com"))  #/my_secret = big_endian_to_int(sha256(b"<my email address>"))
->>> me = MuSigParticipant(PrivateKey(my_secret))
->>> neighbor_pubkey = S256Point.parse(bytes.fromhex("02e79c4eb45764bd015542f6779cc70fef44b7a2432f839264768288efab886291"))  #/neighbor_pubkey = S256Point.parse(bytes.fromhex("<my neighbor's sec pubkey>"))
->>> # create the coordinator with me and my neighbor
->>> coor = MuSigCoordinator([me.point, neighbor_pubkey])  #/
->>> # generate my nonce share using generate_nonce_share
->>> my_nonce_share = me.generate_nonce_share(rand=b'')  #/
->>> # print the nonce share's serialization in hex and share with your neighbor
->>> print(my_nonce_share.serialize().hex())  #/
-02ed93c7309ac71a5eca7ba626b373ce20f4040643b0ff3dd8702eddbe76aa9d7d03c58cad4713bd31c475b7cad30f4feb619233fb5c82cb464b20667e627cdac491
->>> neighbor_share = NoncePublicShare.parse(bytes.fromhex("03b8e4c988117005dce2e1fcb4216fa642cb6d78f591f9caca6763aaf751dba6c8036314b285c9d8c585ca40e9c916724f63bca66e6287bafd9ff386f11b142ecad7"))  #/ neighbor_share = NoncePublicShare.parse(bytes.fromhex("<fill in with your neighbor's hex public nonce share>"))
->>> # register my nonce share to the coordinator
->>> coor.register_nonce_share(me.point.sec(), my_nonce_share)  #/
->>> # register neighbor's share to the coordinator
->>> coor.register_nonce_share(neighbor_pubkey.sec(), neighbor_share)  #/
->>> # create the signing context
->>> context = coor.create_signing_context(msg)  #/
->>> # sign with the context
->>> my_partial_sig = me.sign(context)  #/
->>> # print the partial sig in hex to share with your neighbor
->>> print(my_partial_sig.hex())  #/
-55da5f304e9b8f0ae843574d7979020902cfb5417f6b7e8a9625117096d7835b
->>> neighbor_sig = bytes.fromhex("b4df43368db5ba2ce3a2deea804f600fe67ba3104f3c5da8f584abaf6e5ee083")  #/neighbor_sig = bytes.fromhex("<fill in with your neighbor's partial sig in hex>") 
->>> # sum the two partial sigs and mod by N
->>> s = (big_endian_to_int(my_partial_sig) + big_endian_to_int(neighbor_sig)) % N  #/
->>> # get the nonce point from the context
->>> r = context.nonce_point  #/
->>> # create the Schnorr Signature using the r and the s
->>> sig = SchnorrSignature(r, s)  #/
->>> # check the validity of the schnorr signature using the group point from the context
->>> print(context.group_point.verify_schnorr(msg, sig))  #/
-True
-
-#endexercise
 #markdown
-# MuSig2 Group Point Tweaking
-* If the MuSig2 group point is the KeyPath Spend, then there is a tweak $t$
+# FROST Group Point Tweaking
+* If the FROST group point is the KeyPath Spend, then there is a tweak $t$
 * The group point $P$ and tweak $t$ make the external pubkey $Q=P+tG$
-* $Q$ is $x$-only, so that determines $e_i$ negation, not the $P$
+* $Q$ is $x$-only, so that determines $y_i$ negation, not the $P$
 * We set $Q$ to be the group point
 #endmarkdown
 #code
->>> # example of tweaking the MuSig2 group pubkey
->>> from ecc import G, PrivateKey
->>> from hash import hash_taptweak
->>> from helper import big_endian_to_int
->>> from musig import KeyAggregator
->>> pubkeys = [PrivateKey(i * 1000).point for i in range(1,7)]
->>> keyagg = KeyAggregator(pubkeys)
+>>> # example of tweaking the FROST group pubkey
+>>> from frost import Dealer, FrostCoordinator
+>>> dealer = Dealer([21000000, 12345, 67890])
+>>> signers = {x: dealer.create_signer(x) for x in range(1, 7)}
 >>> merkle_root = b""
->>> tweak = hash_taptweak(keyagg.group_point.xonly() + merkle_root)
->>> t = big_endian_to_int(tweak)
->>> keyagg.group_point = keyagg.group_point + t * G
->>> print(keyagg.group_point.sec().hex())
-037c08a17c0c1141d4dbc135ff4841474a525c3a645154c8ba642213a09cde4fd9
+>>> participants = [1, 3, 6]
+>>> coor = FrostCoordinator(participants, dealer.public_polynomial, merkle_root=merkle_root)
+>>> for x in participants:
+...     p = signers[x]
+...     nonce_share = p.generate_nonce_share(msg=msg, rand=b'')
+...     coor.register_nonce_share(x, nonce_share)
+>>> context = coor.create_signing_context(msg)
+>>> print(context.group_point.sec().hex())
+026c45b3bf6705f29302e0f5b911aa5cb84128576f765723ca955c2d6f7916d3a2
 
 #endcode
 #markdown
@@ -732,29 +642,42 @@ True
 * For odd $Q$: The Schnorr Signature $(R, s-td)$ will validate for the tweaked key $-Q$
 #endmarkdown
 #code
->>> # example of aggregating a tweaked group pubkey
->>> from ecc import G, N, PrivateKey, SchnorrSignature
->>> from helper import big_endian_to_int
->>> from musig import SigningContext, MuSigParticipant, MuSigCoordinator
->>> participant_1 = MuSigParticipant(PrivateKey(1000))
->>> participant_2 = MuSigParticipant(PrivateKey(2000))
->>> msg = b"Hello World!"
->>> nonce_share_1 = NoncePrivateShare(3000, 4000, participant_1.point)
->>> nonce_share_2 = NoncePrivateShare(5000, 6000, participant_2.point)
->>> participant_1.private_share = nonce_share_1
->>> participant_2.private_share = nonce_share_2
->>> pubkeys = [participant_1.point, participant_2.point]
->>> coor = MuSigCoordinator(pubkeys)
->>> tweak = hash_taptweak(coor.keyagg.group_point.xonly() + b"")
->>> t = big_endian_to_int(tweak)
->>> coor.keyagg.group_point = coor.keyagg.group_point + t * G
->>> coor.register_nonce_share(participant_1.point.sec(), nonce_share_1.public_share)
->>> coor.register_nonce_share(participant_2.point.sec(), nonce_share_2.public_share)
+>>> # Example FROST KeyPath Spend
+>>> from ecc import N, PrivateKey, S256Point
+>>> from frost import Dealer, FrostSigner, FrostCoordinator
+>>> from script import address_to_script_pubkey
+>>> from tx import TxIn, TxOut, Tx
+>>> prev_tx = bytes.fromhex("3c78674a5d99932f5236da09f18b18d73c40181b03137ad41e30893bf45a28fa")
+>>> prev_index = 0
+>>> fee = 500
+>>> tx_in = TxIn(prev_tx, prev_index)
+>>> target_amount = tx_in.value(network="signet") - fee
+>>> target_script = address_to_script_pubkey("tb1q7kn55vf3mmd40gyj46r245lw87dc6us5n50lrg")
+>>> tx_out = TxOut(target_amount, target_script)
+>>> tx_obj = Tx(1, [tx_in], [tx_out], network="signet", segwit=True)
+>>> msg = tx_obj.sig_hash(0)
+>>> dealer = Dealer([21000000, 1234567890])
+>>> signers = {x: dealer.create_signer(x) for x in range(1, 4)}
+>>> merkle_root = b""
+>>> participants = [1, 3]
+>>> coor = FrostCoordinator(participants, dealer.public_polynomial, merkle_root=merkle_root)
+>>> for x in participants:
+...     p = signers[x]
+...     nonce_share = p.generate_nonce_share(msg=msg, rand=b'')
+...     coor.register_nonce_share(x, nonce_share)
+>>> me = signers[1]
 >>> context = coor.create_signing_context(msg)
->>> s_1 = big_endian_to_int(participant_1.sign(context))
->>> s_2 = big_endian_to_int(participant_2.sign(context))
+>>> my_partial_sig = me.sign(context)
+>>> coor.register_partial_sig(1, my_partial_sig)
+>>> print(my_partial_sig.hex())
+0aebd63a6cd3863a2a104a03ccfb88f958274050380a9e230f288c18fc834177
+>>> neighbor_sig = bytes.fromhex("6a8ef5084dcaa656f7ef5ed52867f12a9420425703500dc7d09c3bd3a3d22933")
+>>> coor.register_partial_sig(3, neighbor_sig)
+>>> s_1 = big_endian_to_int(my_partial_sig)
+>>> s_2 = big_endian_to_int(neighbor_sig)
 >>> s = (s_1 + s_2) % N
 >>> d = context.challenge()
+>>> t = coor.tweak_amount
 >>> if context.group_point.even:
 ...     s = (s + d * t) % N
 ... else:
@@ -763,101 +686,24 @@ True
 >>> sig = SchnorrSignature(r, s)
 >>> print(context.group_point.verify_schnorr(msg, sig))
 True
+>>> tx_in.finalize_p2tr_keypath(sig.serialize())
+>>> print(tx_obj.verify())
+True
+>>> print(tx_obj.serialize().hex())
+01000000000101fa285af43b89301ed47a13031b18403cd7188bf109da36522f93995d4a67783c0000000000ffffffff01ac84010000000000160014f5a74a3131dedb57a092ae86aad3ee3f9b8d7214014062418375ee48647598819439a947b5afe31865bd382ce422540299045a2f474db65f4de60b6b3529966dc7b62cc9c03ce5f6f41571123a47a6cf78d77cc96c6f00000000
 
 #endcode
-#exercise
-
-Sum the partial signatures, create a Schnorr Signature and verify it using the group point
-
-----
->>> from ecc import G, N, PrivateKey, SchnorrSignature
->>> from musig import SigningContext, MuSigParticipant, MuSigCoordinator
->>> participant_1 = MuSigParticipant(PrivateKey(1000))
->>> participant_2 = MuSigParticipant(PrivateKey(2000))
->>> msg = b"Hello World!"
->>> nonce_share_1 = NoncePrivateShare(3000, 4000, participant_1.point)
->>> nonce_share_2 = NoncePrivateShare(5000, 6000, participant_2.point)
->>> participant_1.private_share = nonce_share_1
->>> participant_2.private_share = nonce_share_2
->>> pubkeys = [participant_1.point, participant_2.point]
->>> merkle_root = bytes.fromhex("818c9d665b78324ba673afca23f5f4f5512214ccfd0554fe82c5f99f5a29689a")
->>> coor = MuSigCoordinator(pubkeys, merkle_root=merkle_root)
->>> t = coor.keyagg.tweak_amount
->>> coor.register_nonce_share(participant_1.point.sec(), nonce_share_1.public_share)
->>> coor.register_nonce_share(participant_2.point.sec(), nonce_share_2.public_share)
->>> context = coor.create_signing_context(msg)
->>> s_1 = 0xa23b11cb8c2120ac414f15fc27f67f4588f770b1e3a2012406a8771287410da1
->>> s_2 = 0x22d4db66c5a3bfecf63ac2b6402a5cba717938d33006a0ee8b1d398aee9dda1e
->>> # sum the two partial sigs and mod by N
->>> s = (s_1 + s_2) % N  #/
->>> # get the challenge from the context
->>> d = context.challenge()  #/
->>> # add d*t to s if even, subtract d*t from s if odd
->>> if context.group_point.even:  #/
-...     s = (s + d * t) % N  #/
-... else:  #/
-...     s = (s - d * t) % N  #/
->>> # get the nonce point from the context
->>> r = context.nonce_point  #/
->>> # create the Schnorr Signature using the r and the s
->>> sig = SchnorrSignature(r, s)  #/
->>> # check the validity of the schnorr signature using the group point from the context
->>> print(context.group_point.verify_schnorr(msg, sig))  #/
-True
-
-#endexercise
 #unittest
-musig:PartialSigTest:test_compute_sig:
+frost:PartialSigTest:test_compute_sig:
 #endunittest
-#exercise
-
-Trade partial signatures with your neighbor and verify for the message from Exercise 10. 
-
-----
->>> from ecc import N, PrivateKey
->>> from hash import hash_musignoncecoef
->>> from helper import big_endian_to_int, sha256
->>> from musig import NoncePrivateShare, NoncePublicShare, MuSigParticipant, MuSigCoordinator
->>> msg = b"Love thy neighbor"
->>> my_secret = big_endian_to_int(sha256(b"jimmy@programmingblockchain.com"))  #/my_secret = big_endian_to_int(sha256(b"<my email address>"))
->>> me = MuSigParticipant(PrivateKey(my_secret))
->>> neighbor_pubkey = S256Point.parse(bytes.fromhex("02e79c4eb45764bd015542f6779cc70fef44b7a2432f839264768288efab886291"))  #/neighbor_pubkey = S256Point.parse(bytes.fromhex("<my neighbor's sec pubkey>"))
->>> merkle_root = bytes.fromhex("818c9d665b78324ba673afca23f5f4f5512214ccfd0554fe82c5f99f5a29689a")
->>> # create the coordinator with me and my neighbor with the merkle root
->>> coor = MuSigCoordinator([me.point, neighbor_pubkey], merkle_root)  #/
->>> # generate my nonce share using generate_nonce_share
->>> my_nonce_share = me.generate_nonce_share(rand=b'')  #/
->>> # print the nonce share's serialization in hex and share with your neighbor
->>> print(my_nonce_share.serialize().hex())  #/
-02ed93c7309ac71a5eca7ba626b373ce20f4040643b0ff3dd8702eddbe76aa9d7d03c58cad4713bd31c475b7cad30f4feb619233fb5c82cb464b20667e627cdac491
->>> neighbor_share = NoncePublicShare.parse(bytes.fromhex("03b8e4c988117005dce2e1fcb4216fa642cb6d78f591f9caca6763aaf751dba6c8036314b285c9d8c585ca40e9c916724f63bca66e6287bafd9ff386f11b142ecad7"))  #/ neighbor_share = NoncePublicShare.parse(bytes.fromhex("<fill in with your neighbor's hex public nonce share>"))
->>> # register my nonce share to the coordinator
->>> coor.register_nonce_share(me.point.sec(), my_nonce_share)  #/
->>> # register neighbor's share to the coordinator
->>> coor.register_nonce_share(neighbor_pubkey.sec(), neighbor_share)  #/
->>> # create the signing context
->>> context = coor.create_signing_context(msg)  #/
->>> # sign with the context
->>> my_partial_sig = me.sign(context)  #/
->>> # register my partial signature with the coordinator
->>> coor.register_partial_sig(me.point.sec(), my_partial_sig)  #/
->>> # print the partial sig in hex to share with your neighbor
->>> print(my_partial_sig.hex())  #/
-68a91aacf62557fed42d8cc4ca262051554f3fa11d06c5330413ef05291ee1e9
->>> neighbor_sig = bytes.fromhex("e247c38fa2322f5a468750970919ba45604332ba8dd8e91f323d42d90ccade25")  #/neighbor_sig = bytes.fromhex("<fill in with your neighbor's partial sig in hex>")
->>> # register neighbor's sig with the coordinator
->>> coor.register_partial_sig(neighbor_pubkey.sec(), neighbor_sig)  #/
->>> # get the schnorr signature from the coordinator
->>> sig = coor.compute_sig()  #/
->>> # print whether the signature verifies
->>> print(coor.group_point.verify_schnorr(msg, sig))  #/
-True
->>> # print the signature, serialized in hex
->>> print(sig.serialize().hex())  #/
-c26a3a9ed24ebb0ac3d8cb99bca92112339d88477a713de9b1d1740f2e4d0a179cf23b53f562f7698b50390768b8692690572c8b26510625ec98b19eca81cadc
-
-#endexercise
 """
 
 FUNCTIONS = """
+frost.lagrange
+frost.lagrange_coef
+frost.Dealer.create_signer
+frost.FrostCoordinator.compute_sig
+frost.FrostSigner.sign
+frost.PrivatePolynomial.y_value
+frost.SigningContext.verify
 """

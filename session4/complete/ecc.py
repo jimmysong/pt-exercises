@@ -372,7 +372,6 @@ class S256Point(Point):
         # verify the message using the self.verify method
         return self.verify(z, sig)
 
-
     def even_point(self):
         # if the point is even, return itself, otherwise, multiply by -1
         if self.even:
@@ -556,7 +555,8 @@ class SchnorrTest(TestCase):
         priv = PrivateKey(837120557)
         k = priv.bip340_k(msg)
         self.assertEqual(
-            k, 59142679386349195458604976147959907507215885648178571847306375481691593063625
+            k,
+            59142679386349195458604976147959907507215885648178571847306375481691593063625,
         )
 
 

@@ -110,19 +110,29 @@ class NoncePublicShare:
 
 class KeyAggregator:
     """Structure for aggregating keys to a group point for MuSig2"""
-    def __init__(self, points, merkle_root=None):
+    def __init__(self, points, merkle_root=None, sort=True):
         # the points that make up the MuSig2 aggregate key
-        self.points = points
+        if sort:
+            self.secs = sorted([p.sec() for p in points])
+            self.points = [S256Point.parse(c) for c in self.secs]
+        else:
+            self.secs = [p.sec() for p in points]
+            self.points = points
         # compute the group commitment (L)
         self.group_commitment = self.compute_group_commitment()
         # The group point (P)
         self.group_point = self.compute_group_point()
+        self.non_tweaked_group_point = self.group_point
+        self.merkle_root = merkle_root
         # any tweaking we need to do to the group point
         if merkle_root is None:
             self.tweak_amount = 0
         else:
             self.tweak_amount = big_endian_to_int(self.group_point.tweak(merkle_root))
             self.group_point = self.group_point.tweaked_key(merkle_root)
+
+    def address(self, network="mainnet"):
+        return self.non_tweaked_group_point.p2tr_address(self.merkle_root, network)
 
     def compute_group_commitment(self):
         """L = H(P_1 || P_2 || ... || P_n)"""
@@ -365,6 +375,9 @@ class MuSigCoordinator:
         self.nonceagg = None
         self.signing_context = None
         self.partial_sigs = {}
+
+    def address(self, network="mainnet"):
+        return self.keyagg.address(network)
 
     def compute_nonce_point(self, msg):
         # compute nonce share sums, S and T from the nonce shares

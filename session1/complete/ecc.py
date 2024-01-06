@@ -372,7 +372,6 @@ class S256Point(Point):
         # verify the message using the self.verify method
         return self.verify(z, sig)
 
-
     def even_point(self):
         # if the point is even, return itself, otherwise, multiply by -1
         if self.even:

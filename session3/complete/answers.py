@@ -506,12 +506,12 @@ Participant 2's $l$ and $m$: 5000, 6000
 >>> coor.register_nonce_share(participant_2.point.sec(), nonce_share_2.public_share)
 >>> # create the signing context, which should aggregate the points
 >>> context = coor.create_signing_context(msg)  #/
->>> # determine the first participant's nonce (k_i) from the nonce point's evenness
+>>> # determine the second participant's nonce (k_i) from the nonce point's evenness
 >>> if context.nonce_point.even:  #/
 ...     k = participant_2.nonce(context.nonce_coef())  #/
 ... else:  #/
 ...     k = N - participant_2.nonce(context.nonce_coef())  #/
->>> # determine the first participant's secret (e_i) from the group point's evenness
+>>> # determine the second participant's secret (e_i) from the group point's evenness
 >>> if context.group_point.even:  #/
 ...     e = participant_2.private_key.secret  #/
 ... else:  #/
