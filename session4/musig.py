@@ -159,9 +159,7 @@ class KeyAggregator:
         return S256Point.sum(terms)
 
     def keyagg_coef(self, point):
-        """the coefficient for each pubkey, based on the group commitment and
-        the individual pubkey, except for the second point, which is 1
-        c_i = H(L || P_i) except c_2 = 1"""
+        """the coefficient for each pubkey, c_i = H(L || P_i) except c_2 = 1"""
         # if the point is not in the list of points, raise a ValueError
         if point not in self.points:
             raise ValueError(f"{point.sec().hex()} is not a participant")
@@ -174,29 +172,13 @@ class KeyAggregator:
         # if the point is the same as the second_point, return 1
         if point == second_point:
             return 1
-        # coefficient is H(L || P) converted from big endian to an integer
+        # coefficient is H(L||P) converted from big endian to an integer
         # where H is hash_keyaggcoef, L is the group commitment, and P is
         # the compressed sec serialization of the point
         return big_endian_to_int(hash_keyaggcoef(self.group_commitment + point.sec()))
 
 
 class KeyAggTest(TestCase):
-    def test_compute_group_commitment(self):
-        raw_pubkeys = [
-            "034a5169f673aa632f538aaa128b6348536db2b637fd89073d49b6a23879cdb3ad",
-            "0225fa6a4190ddc87d9f9dd986726cafb901e15c21aafd2ed729efed1200c73de8",
-            "03ed214e8ce499d92a2085e7e6041b4f081c7d29d8770057fc705a131d2918fcdb",
-            "02609ae8d31e3b290e74483776c1c8dfc2756b87d9635d654eb9e1ca95c228b169",
-            "02ffe558e388852f0120e46af2d1b370f85854a8eb0841811ece0e3e03d282d57c",
-            "02d42d696f2c343dc67d80fcd85dbbdb2edef3cac71126625d0cbcacc231a00015",
-        ]
-        points = [S256Point.parse(bytes.fromhex(r)) for r in raw_pubkeys]
-        keyagg = KeyAggregator(points)
-        self.assertEqual(
-            keyagg.group_commitment.hex(),
-            "9a02b1f7c524456922ec47b4db33810e244866f68a5d4478fc5b83c43231dad0",
-        )
-
     def test_compute_group_point(self):
         raw_pubkeys = [
             "034a5169f673aa632f538aaa128b6348536db2b637fd89073d49b6a23879cdb3ad",
@@ -209,8 +191,12 @@ class KeyAggTest(TestCase):
         points = [S256Point.parse(bytes.fromhex(r)) for r in raw_pubkeys]
         keyagg = KeyAggregator(points)
         self.assertEqual(
+            keyagg.group_commitment.hex(),
+            "19eb904fe5e658ba652c6e65a1a2a7b90b4f76190751508323f3eac2fb1313b1",
+        )
+        self.assertEqual(
             keyagg.group_point.sec().hex(),
-            "03628b3911ec6818290dbc40e0039652ceac6bef4355c6b461af870d0aafa123a0",
+            "0260c1cb3a2a8c55083e0c8fd5548634075eb7b04af0a35e6e57d05abff2815e56",
         )
 
 
@@ -225,40 +211,39 @@ class SigningContext:
         self.msg = msg
         # make the group point available for convenience
         self.group_point = self.keyagg.group_point
+        # make the nonce coeffficien available for convenience
+        self.nonce_coef = self.compute_nonce_coef()
         # make the nonce point available for convenience
-        self.nonce_point = self.group_nonce_point()
+        self.nonce_point = self.compute_nonce_point()
+        # make the challenge available for convenience
+        self.challenge = self.compute_challenge()
 
     def keyagg_coef(self, point):
         """Convenience method"""
         return self.keyagg.keyagg_coef(point)
 
-    def nonce_coef(self):
+    def compute_nonce_coef(self):
         """the coefficient in front of the second nonce determined by the msg"""
         preimage = self.nonceagg.serialize() + self.group_point.xonly() + self.msg
         return big_endian_to_int(hash_musignoncecoef(preimage))
 
-    def group_nonce_point(self):
+    def compute_nonce_point(self):
         """R = S + bT where b is the nonce coefficient, dependent on msg"""
-        return self.nonceagg.nonce_point(self.nonce_coef())
+        return self.nonceagg.nonce_point(self.nonce_coef)
 
-    def challenge(self):
-        """The message being signed by each participant so it aggregates to
-        a single signature. This is what will get verified in the end
-        d = H(R || P || z)"""
-        preimage = (
-            self.group_nonce_point().xonly() + self.group_point.xonly() + self.msg
-        )
-        return big_endian_to_int(hash_challenge(preimage))
+    def compute_challenge(self):
+        """The message being signed d = H(R || P || z)"""
+        pi = (self.nonce_point.xonly() + self.group_point.xonly() + self.msg)
+        return big_endian_to_int(hash_challenge(pi))
 
     def verify(self, partial_sig, nonce_public_share, point):
-        """Verify that the partial signature is valid for a particular nonce
-        for a particular pubkey"""
-        # get the nonce point for this particular pubkey
-        # we negate if it's odd
+        # if nonce point is even, we use R_i, otherwise -R_i
         if self.nonce_point.even:
-            r = nonce_public_share.nonce_point(self.nonce_coef())
+            # get R_i using nonce_public_share and the nonce_coef
+            r = nonce_public_share.nonce_point(self.nonce_coef)
         else:
-            r = -1 * nonce_public_share.nonce_point(self.nonce_coef())
+            # get -R_i using nonce_public_share and the nonce_coef
+            r = -1 * nonce_public_share.nonce_point(self.nonce_coef)
         # negate the participant point if our group point is odd
         if self.group_point.even:
             p = point
@@ -267,63 +252,64 @@ class SigningContext:
         # c is our keyagg coefficient for this particular participant point
         c = self.keyagg_coef(point)
         # d is our challenge H(R||P||z)
-        d = self.challenge()
-        # return whether s_i * G = R + c_i * d * P_i
+        d = self.challenge
+        # s_i is the partial sig in big endian
         s = big_endian_to_int(partial_sig)
+        # return whether s_i * G = R + c_i * d * P_i
         return s * G == r + c * d * p
 
 
 class MuSigParticipant:
     """Represents a MuSig2 signer"""
-    def __init__(self, private_key, private_share=None):
+    def __init__(self, private_key, nonce_private_share=None):
         # The private key (e_i)
         self.private_key = private_key
         # The public key/point (P_i = e_i * G)
         self.point = private_key.point
         # The nonce private share l,m which can be used to generate the nonce k
-        self.private_share = private_share
+        self.nonce_private_share = nonce_private_share
         # Make sure the nonce private share belongs to this participant
-        if private_share and self.point != self.private_share.pubkey:
+        if nonce_private_share and self.point != self.nonce_private_share.pubkey:
             raise ValueError("Nonce does not correspond to the participant")
 
     def generate_nonce_share(
         self, aggregate_pubkey=None, msg=None, extra=None, rand=None
     ):
         # If we don't have a nonce yet, generate it using the secure generation algo
-        self.private_share = NoncePrivateShare.generate_nonce_share(
+        self.nonce_private_share = NoncePrivateShare.generate_nonce_share(
             self.point, self.private_key, aggregate_pubkey, msg, extra, rand
         )
-        return self.private_share.public_share
+        return self.nonce_private_share.public_share
 
     def nonce(self, coef):
         """k_i = l_i + b * m_i"""
-        if self.private_share is None:
+        if self.nonce_private_share is None:
             raise RuntimeError("Nonce shares have not been defined yet")
-        return self.private_share.nonce(coef)
+        return self.nonce_private_share.nonce(coef)
 
     def sign(self, context):
         """Sign the message in the context using the nonces in the context"""
         # if the group nonce point is odd, we need to negate the k_i
         # use the nonce method with the context's nonce_coef
         if context.nonce_point.even:
-            k = self.nonce(context.nonce_coef())
+            k = self.nonce(context.nonce_coef)
         else:
-            k = N - self.nonce(context.nonce_coef())
+            k = N - self.nonce(context.nonce_coef)
         # get this point's keyagg coefficient (c_i = H(L || P_i))
         c = context.keyagg_coef(self.point)
         # get the challenge (d = H (R || P || z)
-        d = context.challenge()
+        d = context.challenge
         # if the group point is odd, we need to negate the secret (e_i)
         if context.group_point.even:
             e = self.private_key.secret
         else:
             e = N - self.private_key.secret
-        # s_i = k + c_i * d * e_i, where d is the challenge
+        # s_i = k + c_i * d * e_i, where d is the challenge, mod by N
         s = (k + c * d * e) % N
         # the partial signature is s as big endian, 32 bytes
         partial_sig = int_to_big_endian(s, 32)
         # check that partial sig verifies using the verify method of context
-        if not context.verify(partial_sig, self.private_share.public_share, self.point):
+        if not context.verify(partial_sig, self.nonce_private_share.public_share, self.point):
             raise RuntimeError("failed to verify")
         # return the partial signature
         return partial_sig
@@ -336,8 +322,8 @@ class PartialSigTest(TestCase):
         msg = b"Hello World!"
         nonce_share_1 = NoncePrivateShare(3000, 4000, participant_1.point)
         nonce_share_2 = NoncePrivateShare(5000, 6000, participant_2.point)
-        participant_1.private_share = nonce_share_1
-        participant_2.private_share = nonce_share_2
+        participant_1.nonce_private_share = nonce_share_1
+        participant_2.nonce_private_share = nonce_share_2
         pubkeys = [participant_1.point, participant_2.point]
         coor = MuSigCoordinator(pubkeys)
         coor.register_nonce_share(participant_1.point.sec(), nonce_share_1.public_share)
@@ -355,14 +341,14 @@ class PartialSigTest(TestCase):
         msg = b"Hello World!"
         nonce_share_1 = NoncePrivateShare(3000, 4000, participant_1.point)
         nonce_share_2 = NoncePrivateShare(5000, 6000, participant_2.point)
-        participant_1.private_share = nonce_share_1
-        participant_2.private_share = nonce_share_2
+        participant_1.nonce_private_share = nonce_share_1
+        participant_2.nonce_private_share = nonce_share_2
         pubkeys = [participant_1.point, participant_2.point]
         coor = MuSigCoordinator(pubkeys)
         coor.register_nonce_share(participant_1.point.sec(), nonce_share_1.public_share)
         coor.register_nonce_share(participant_2.point.sec(), nonce_share_2.public_share)
         context = coor.create_signing_context(msg)
-        partial_sig = participant_1.sign(context)
+        partial_sig = bytes.fromhex("1aad95d9490e4b8599377ff6a546a1d075fb4242c749dbcbc010589e23c21776")
         self.assertTrue(
             context.verify(partial_sig, nonce_share_1.public_share, participant_1.point)
         )
@@ -373,8 +359,8 @@ class PartialSigTest(TestCase):
         msg = b"Hello World!"
         nonce_share_1 = NoncePrivateShare(3000, 4000, participant_1.point)
         nonce_share_2 = NoncePrivateShare(5000, 6000, participant_2.point)
-        participant_1.private_share = nonce_share_1
-        participant_2.private_share = nonce_share_2
+        participant_1.nonce_private_share = nonce_share_1
+        participant_2.nonce_private_share = nonce_share_2
         pubkeys = [participant_1.point, participant_2.point]
         for merkle_root in (
             None,
@@ -400,8 +386,7 @@ class PartialSigTest(TestCase):
 
 
 class MuSigCoordinator:
-    """Coordinator that collects nonces and partial signatures and generates the
-    final SchnorrSignature"""
+    """Coordinator that collects nonces and final SchnorrSignature generation"""
     def __init__(self, participant_points, merkle_root=None, sort=True):
         if len(participant_points) == 0:
             raise ValueError("Need at least one public key")
@@ -412,7 +397,7 @@ class MuSigCoordinator:
         else:
             self.secs = [p.sec() for p in participant_points]
             self.points = participant_points
-        self.keyagg = KeyAggregator(self.points, merkle_root=merkle_root)
+        self.keyagg = KeyAggregator(self.points, merkle_root=merkle_root, sort=sort)
         # convenience
         self.group_point = self.keyagg.group_point
         self.nonce_shares = {}
@@ -428,7 +413,7 @@ class MuSigCoordinator:
         # S = S_1 + S_2 + ... + S_n, T = T_1 + T_2 + ... + T_n
         s = S256Point.sum([share.s for share in self.nonce_shares.values()])
         t = S256Point.sum([share.t for share in self.nonce_shares.values()])
-        # the preimage is S || T || P || z, S and T are in sec and P in xonly
+        # the preimage is S || T || P || z, S and T are in sec and P in xonly and z is the message
         preimage = s.sec() + t.sec() + self.group_point.xonly() + msg
         # nonce_coef (b) is hash_musignoncecoef of the preimage as a big endian int
         b = big_endian_to_int(hash_musignoncecoef(preimage))
@@ -475,28 +460,28 @@ class MuSigCoordinator:
         """Aggregates the partial signatures"""
         # sum up the partial signatures to a complete s
         s = sum(self.partial_sigs.values()) % N
-        # get the group nonce point (R) from the signing context
+        # get the nonce point (R) from the signing context
         r = self.signing_context.nonce_point
         # if we've tweaked (see self.keyagg.tweak_amount), we need to shift s
         if self.keyagg.tweak_amount:
-            # tweak (t) is held in the Key Aggregator
+            # tweak (t) is the self.keyagg.tweak_amount
             t = self.keyagg.tweak_amount
             # challenge d = H(R||Q||m)  is in the signing context
-            d = self.signing_context.challenge()
-            # s = s + d * t if group point is even, s = s - d * t if odd
+            d = self.signing_context.challenge
+            # s = (s + d * t) % N if group point is even, s = (s - d * t) % N if odd
             if self.group_point.even:
                 s = (s + d * t) % N
             else:
                 s = (s - d * t) % N
         # create the signature
-        signature = SchnorrSignature(r, s)
+        sig = SchnorrSignature(r, s)
         # sanity check that the generated signature validates
         if not self.signing_context.group_point.verify_schnorr(
-            self.signing_context.msg, signature
+            self.signing_context.msg, sig
         ):
             raise RuntimeError("Signature does not validate")
         # return the signature
-        return signature
+        return sig
 
 
 class NonceAggTest(TestCase):
@@ -588,13 +573,13 @@ class MuSigTest(TestCase):
         for test in test_data["valid_test_cases"]:
             raw_pubkeys = [test_data["pubkeys"][i] for i in test["key_indices"]]
             pubkeys = [S256Point.parse(bytes.fromhex(raw)) for raw in raw_pubkeys]
-            keyagg = KeyAggregator(pubkeys)
+            keyagg = KeyAggregator(pubkeys, sort=False)
             self.assertEqual(keyagg.group_point.xonly().hex().upper(), test["expected"])
         for test in test_data["error_test_cases"]:
             with self.assertRaises(ValueError):
                 raw_pubkeys = [test_data["pubkeys"][i] for i in test["key_indices"]]
                 pubkeys = [S256Point.parse(bytes.fromhex(raw)) for raw in raw_pubkeys]
-                keyagg = KeyAggregator(pubkeys)
+                keyagg = KeyAggregator(pubkeys, sort=False)
 
     def test_nonce_generation(self):
         tests = [

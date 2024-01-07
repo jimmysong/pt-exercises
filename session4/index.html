@@ -109,8 +109,9 @@
 ...
 my_secret = 21000000
 me = MuSigParticipant(PrivateKey(my_secret))
+my_pubkey = me.point
 neighbor_pubkey = S256Point.parse(bytes.fromhex("029addad123cfcfa19c501dd1f15ca93b74a57ef88aa34035470dd46e54b5931c6"))
-pubkeys = [me.point, neighbor_pubkey]
+pubkeys = [my_pubkey, neighbor_pubkey]
 keyagg = KeyAggregator(pubkeys)
 group_point = keyagg.group_point
 ts = TapScript([group_point.xonly(), 0xAC])
@@ -127,20 +128,16 @@ tx_out = TxOut(target_amount, target_script)
 tx_obj = Tx(1, [tx_in], [tx_out], network="signet", segwit=True)
 msg = tx_obj.sig_hash(0)
 my_nonce_share = me.generate_nonce_share(msg=msg, aggregate_pubkey=group_point, rand=b'')
-print(my_nonce_share.serialize().hex())
 neighbor_share = NoncePublicShare.parse(bytes.fromhex("02d8ffef7503cec7a5046d238f53d5f599e57772813aa8b4c1cbd017a453fbcd25026bc7edd0264573f8e90e2f1d6753b0004010d8d1c235f5f1c44995f5376a0e81"))
-coor.register_nonce_share(me.point.sec(), my_nonce_share)
+coor.register_nonce_share(my_pubkey.sec(), my_nonce_share)
 coor.register_nonce_share(neighbor_pubkey.sec(), neighbor_share)
 context = coor.create_signing_context(msg)
 my_partial_sig = me.sign(context)
-coor.register_partial_sig(me.point.sec(), my_partial_sig)
-print(my_partial_sig.hex())
+coor.register_partial_sig(my_pubkey.sec(), my_partial_sig)
 neighbor_sig = bytes.fromhex("82420b4a9accb4392eb850cb1853849a03a35711f3d7ae112eff9fd3214bc538")
 coor.register_partial_sig(neighbor_pubkey.sec(), neighbor_sig)
 sig = coor.compute_sig().serialize()
 tx_in.finalize_p2tr_keypath(sig)
-print(tx_obj.verify())
-print(tx_obj.serialize().hex())
     </code></pre>
   </section>
   <section>
@@ -186,7 +183,7 @@ print(tx_obj.serialize().hex())
       <li class="fragment">Dealer creates a degree $t-1$ polynomial with random coefficients $a_1,...,a_{t-1}$
       <li class="fragment">The dealer creates a polynomial $f(x)=e+a_1x+a_2x^2+...+a_{t-1}x^{t-1}$
       <li class="fragment">$f(0)=e$ so that's where the secret is
-      <li class="fragment">Signer $i$ gets dealt $f(x)=y_i \forall{i} \in {1,2,...,n}$
+      <li class="fragment">Signer $i$ gets dealt $f(i)=y_i \forall{i} \in {1,2,...,n}$
       <li class="fragment">$y_i$ is the share of the secret
     </ul>
   </section>
@@ -240,7 +237,7 @@ print(shares[5])
     <h2>Lagrange Interpolation Polynomial</h2>
     <ul>
       <li class="fragment">For a participant at $x_i$ where $X = \{x_1, x_2, ... x_t\}$
-      <li class="fragment">Goal is a $t-1$ degree polynomial $g_i(x)$ such that: $g_i(x_i)=1$ and $g_i(x_j)=0$ where $j\ne i$
+      <li class="fragment">Goal is a degree $t-1$ polynomial $g_i(x)$ such that: $g_i(x_i)=1$ and $g_i(x_j)=0$ where $j\ne i$
       <li class="fragment">Note $g_i(x_j)=0$ if $g_i(x)=(x-x_j)h(x)$
       <li class="fragment">Let $h_i(x)=\prod_{j \ne i}{(x-x_j)}$
       <li class="fragment">Note $h_i(x)$ is degree $t-1$
@@ -283,7 +280,7 @@ print(g(1), g(3), g(4), g(55))
     <h2>Using Lagrange</h2>
     <ul>
       <li class="fragment">$h(x_i)=y_i \forall x_i \in X$, hitting $t$ points.
-      <li class="fragment">Those points define the same polynomial $h(x)=f(x)$ where $f(x)$ is the dealer's original polynoomial
+      <li class="fragment">Those points define the same polynomial $h(x)=f(x)$ where $f(x)$ is the dealer's original polynomial
       <li class="fragment">Since $f(0)=e$, $h(0)=\sum{h_i(0)}$ meaning we can recover the secret through participant shares and Lagrange Interpolation Polynomials.
     </ul>
   </section>
@@ -332,7 +329,7 @@ Participant 6 has $y_6=2024$.
       <li class="fragment">Flexible Round-Optimized Schnorr Threshold Signatures
       <li class="fragment">Like Shamir, but instead of participants cooperating to recover the secret, they cooperate to sign a message
       <li class="fragment">There are $n$ signers, but $t$ participants in any signature.
-      <li class="fragment">Main dvantage over MuSig2 is that it doesn't require everyone.
+      <li class="fragment">Main advantage over MuSig2 is that it doesn't require everyone.
       <li class="fragment">Another advantage is that you can change the signers without changing the underlying secret.
     </ul>
   </section>
@@ -340,7 +337,7 @@ Participant 6 has $y_6=2024$.
     <h2>Dealer Key Generation</h2>
     <ul>
       <li class="fragment">Exactly as Shamir Secret Sharing, a private polynomial $f(x)=e+a_1x+a_2x^2...a_{t-1}x^{t-1}$ where secret is $e$ and $a_i$ is random
-      <li class="fragment">$y$ values at each $x$ is distributed as shares to signers
+      <li class="fragment">$y$ values at each $x$ are distributed as shares to signers
       <li class="fragment">We create a public polynomial $F(x)$ which is $f(x)$ multiplied by $G$, $F(x)=f(x)G$ $F(x)=eG+a_1xG+a_2x^2G+...+a_{t-1}x^{t-1}G$
       <li class="fragment">Note $F(x)=P+xA_1+x^2A_2+...+x^{t-1}A_{t-1}$ where $a_iG=A_i$. Note $F(0)=P$
     </ul>
@@ -379,9 +376,9 @@ print(signer_1.point.sec().hex())
     <h2>Differences with MuSig2</h2>
     <ul>
       <li class="fragment">We can use the same distributed nonce generation technique as MuSig2, except only participants create nonces
-      <li class="fragment">Thus, we can do two rounds, one for nonce distribution, second for signing collection
+      <li class="fragment">Thus, we can do two rounds, one for nonce generation, second for signing collection
       <li class="fragment">Actual paper optimizes for rounds, so nonces are created and distributed by each signer to other signers during signer setup, reducing 1 round of interaction
-      <li class="fragment">This is less safe since using the same nonce twice will leak the person's secret.
+      <li class="fragment">This is less safe since using the same nonce twice will leak the signer's secret.
     </ul>
   </section>
   <section>
@@ -391,8 +388,8 @@ print(signer_1.point.sec().hex())
       <li class="fragment">Participant creates the nonce $k_i = l_i + b m_i$
       <li class="fragment">LaGrange coefficient $c_i = g_i(0)$ and challenge $d=\mathcal{H}(R,P,z)$ come from the signing context
       <li class="fragment">Partial sig is $s_i = k_i + c_i d y_i$ where $y_i$ is the participant's secret/$y$-value
-      <li class="fragment">If $R$ is odd, participant uses $N-k_i$ for signing because $-R_i=-k_iG$ and $R=\sum{R_i}$
-      <li class="fragment">If $P$ is odd, participant uses $N-e_i$ for signing because $-P_i=-e_iG$ and $P=\sum{c_iP_i}$
+      <li class="fragment">If $R$ is odd, participant uses $N-k_i$ for signing because $-R_i=-k_iG$ and $-R=\sum{-R_i}$
+      <li class="fragment">If $P$ is odd, participant uses $N-e_i$ for signing because $-P_i=-e_iG$ and $-P=\sum{-c_iP_i}$
     </ul>
   </section>
   <section>
@@ -582,6 +579,39 @@ print(tx_obj.serialize().hex())
       <li>Make this test pass:
         <code>musig:PartialSigTest:test_compute_sig</code>
     </ol>
+  </section>
+</section>
+<section>
+  <section>
+    <h2>FROST Notes</h2>
+    <ul>
+      <li class="fragment">Distributed key generation can be done by having every signer create their own private polynomial
+      <li class="fragment">Enrolment is the bringing on of a new signer, which can be done without a dealer!
+      <li class="fragment">The group secret can stay the same while the shares are changed (add a random polynomial). This is called refreshing shares.
+      <li class="fragment">You can drop a signer, provided each other signer securely deletes their share after refreshing shares.
+      <li class="fragment">Brand new type of wallet is needed to make FROST viable (not HD wallet compatible)
+    </ul>
+  </section>
+  <section>
+    <h2>Further Study</h2>
+    <ul>
+      <li class="fragment">Bech32m
+      <li class="fragment">BIP341 Sig Hash algorithm (different for KeyPath and ScriptPath)
+      <li class="fragment">CISA (Cross-Input Signature Aggregation)
+      <li class="fragment">Various ways to do TapRoot MultiSig
+      <li class="fragment">MuSig Nonce Generation
+      <li class="fragment">FROST distributed Key Generation.
+    </ul>
+  </section>
+  <section>
+    <h1 class="fragment">Congratulations!</h1>
+  </section>
+  <section>
+    <h2>Survey</h2>
+    <ul>
+      <li class="fragment">Endorsements on X, LinkedIn, Nostr, etc. very welcome!
+      <li class="fragment">Please provide feedback <a href="https://www.surveymonkey.com/r/93GRWQ7">here</a>
+    </ul>
   </section>
 </section>
 </div>

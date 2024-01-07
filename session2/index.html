@@ -40,7 +40,7 @@
       <li><strong>FROST</strong>
     </ul>
   </section>
-  <section>
+  <section>v
     <h2>Session Objectives</h2>
     <ul>
       <li class="fragment"><strong>Create a p2tr Key Path Spending Transaction</strong>
@@ -225,7 +225,7 @@ print(tx_obj.serialize().hex())
   </section>
   <section>
     <h3>Pay-to-TapRoot Spending TX</h3>
-    <div class="medhex"><code class="brown">01000000</code><strong><code class="light-blue">0001</code></strong><code class="red">01</code><code class="blue">376afebcc53dd694c99c5674846909881f790145948cb820b1f61f8948630925</code><code class="magenta">00000000</code><code class="yellow">00</code><code class="purple">ffffffff</code><code class="red">02</code><code class="green">409c000000000000</code><code class="dark-orange">160014f5a74a3131dedb57a092ae86aad3ee3f9b8d7214</code><code class="green">6ce8000000000000</code><code class="dark-orange">2251204994481c22c21fb6f1362b154b86ec3d04890594b127ae658dda76c6c1cfcf5e</code><code class="cyan">014002de2a8a88783937f10742235dfdf6a0f9526f4e8eee9d3d4cd11d5813269a0d1b56b5028b81735dae9d3dd9b9f2fe2193474dba0569cff087c2575f0f8f5b5f</code><code class="dark-red">00000000</code>
+    <div class="medhex"><code class="brown">01000000</code><code class="light-blue">0001</code><code class="red">01</code><code class="blue">376afebcc53dd694c99c5674846909881f790145948cb820b1f61f8948630925</code><code class="magenta">00000000</code><code class="yellow">00</code><code class="purple">ffffffff</code><code class="red">02</code><code class="green">409c000000000000</code><code class="dark-orange">160014f5a74a3131dedb57a092ae86aad3ee3f9b8d7214</code><code class="green">6ce8000000000000</code><code class="dark-orange">2251204994481c22c21fb6f1362b154b86ec3d04890594b127ae658dda76c6c1cfcf5e</code><code class="cyan">014002de2a8a88783937f10742235dfdf6a0f9526f4e8eee9d3d4cd11d5813269a0d1b56b5028b81735dae9d3dd9b9f2fe2193474dba0569cff087c2575f0f8f5b5f</code><code class="dark-red">00000000</code>
       <div class="container">
         <div class="col">
           <ul>
@@ -552,7 +552,7 @@ print(script_pubkey)
     <ul>
       <li class="fragment">Leaves of the Merkle Tree which contain TapScripts
       <li class="fragment">Contains TapLeaf Version (<code>0xc0</code>) and TapScript
-      <li class="fragment">Any Leaf can successfully execute to spend using the Taproot Script Path
+      <li class="fragment">Any Leaf can be used to spend on the Taproot Script Path
       <li class="fragment">Hash of a TapLeaf is a Tagged Hash (TapLeaf) of the version + TapScript
     </ul>
   </section>
@@ -562,13 +562,12 @@ print(script_pubkey)
 # Example of making a TapLeaf and calculating the hash
 from ecc import PrivateKey
 from hash import hash_tapleaf
-from helper import int_to_byte
 from taproot import TapScript, TapLeaf
 pubkey_a = PrivateKey(11111111).point.xonly()
 pubkey_b = PrivateKey(22222222).point.xonly()
-tap_script = TapScript([pubkey_a, 0xAD, pubkey_b, 0xAC])
+tap_script = TapScript([pubkey_a, 0xad, pubkey_b, 0xac])
 tap_leaf = TapLeaf(tap_script)
-h = hash_tapleaf(int_to_byte(tap_leaf.tapleaf_version) + tap_leaf.tap_script.serialize())
+h = hash_tapleaf(bytes([tap_leaf.tapleaf_version]) + tap_leaf.tap_script.serialize())
 print(h.hex())
     </code></pre>
   </section>
@@ -784,14 +783,60 @@ print(merkle_root.hex())
     <h2>Script Path Spending </h2>
   </section>
   <section>
-    <h2>Control Block</h2>
+    <h3>Pay-to-TapRoot Script Path Spending TX</h3>
+    <div class="medhex"><code class="brown">01000000</code><code class="light-blue">0001</code><code class="red">01</code><code class="blue">a2b85a1372be6bc9a3d53110a4f142819d653fa6d07fbd436713814503091420</code><code class="magenta">00000000</code><code class="yellow">00</code><code class="purple">ffffffff</code><code class="red">01</code><code class="green">84e4000000000000</code><code class="dark-orange">160014f5a74a3131dedb57a092ae86aad3ee3f9b8d7214</code><code class="cyan">03403b1681a67f40e6767b2db64744ad3f005d3971645135d58a3e1826d5c960bc281ce187bc9270c51ed7833fcf5e8415501862d51b0ebd051917d9878104778f292220cd04c1bf88ca891af152fc57c36523ab59efb16b7ec07caca0cfc4a1f2051d9eac61c0cd04c1bf88ca891af152fc57c36523ab59efb16b7ec07caca0cfc4a1f2051d9e76f5c1cdfc8b07dc8edca5bef2b4991201c5a0e18b1dbbcfe00ef2295b8f6dffaf5548715217f7a892c7c5ff787a97b6e2f123287a1a354fe3ccda09c39d5d73</code><code class="dark-red">00000000</code>
+      <div class="container">
+        <div class="col">
+          <ul>
+            <li><code class="brown">01000000</code> - Version
+            <li><code class="light-blue">0001</code> - Segwit Marker
+            <li><code class="red">01</code> - Number of inputs
+            <li><code class="blue">a2b8…20</code> - Prev tx hash
+            <li><code class="magenta">00000000</code> - Prev tx index
+            <li><code class="yellow">00</code> - ScriptSig
+            <li><code class="purple">ffffffff</code> - Sequence
+          </ul>
+        </div>
+        <div class="col">
+          <ul>
+            <li><code class="red">01</code> - Number of outputs
+            <li><code class="green">84e4…00</code> - Amount in Satoshis
+            <li><code class="dark-orange">1600…14</code> - ScriptPubKey
+            <li><code class="cyan">0340…73</code> - Witness
+            <li><code class="dark-red">00000000</code> - Locktime
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+  <section>
+    <h2>Identifying Script Path Spend</h2>
     <ul>
-      <li class="fragment">Used to prove the UTXO contains the TapScript
-      <li class="fragment">The hashes of the Merkle Proof and the Internal Public Key are revealed in it
+      <li class="fragment">If the Witness has more than 1 element, then it's a Script Path spend.
       <li class="fragment">Control Block is the last element of the Witness field
       <li class="fragment">TapScript is the second-to-last element
-      <li class="fragment">The hash of the TapScript, the Merkle Proof and Interal PubKey combine to produce the External Pubkey in the UTXO
       <li class="fragment">The rest of the elements of the Witness field satisfy the TapScript
+    </ul>
+  </section>
+  <section>
+    <h3>Witness</h3>
+    <div class="medhex"><code class="red">03</code><code class="cyan">403b1681a67f40e6767b2db64744ad3f005d3971645135d58a3e1826d5c960bc281ce187bc9270c51ed7833fcf5e8415501862d51b0ebd051917d9878104778f29</code><code class="green">2220cd04c1bf88ca891af152fc57c36523ab59efb16b7ec07caca0cfc4a1f2051d9eac</code><code class="yellow">61c0cd04c1bf88ca891af152fc57c36523ab59efb16b7ec07caca0cfc4a1f2051d9e76f5c1cdfc8b07dc8edca5bef2b4991201c5a0e18b1dbbcfe00ef2295b8f6dffaf5548715217f7a892c7c5ff787a97b6e2f123287a1a354fe3ccda09c39d5d73</code><p/>
+      <ul>
+        <li class="fragment"><code class="red">03</code> - Number of Witness elements</li>
+        <li class="fragment"><code class="cyan">403b…29</code> - Schnorr Signature</li>
+        <li class="fragment"><code class="green">2220…ac</code> - TapScript</li>
+        <li class="fragment"><code class="yellow">61c0…73</code> - Control Block</li>
+      </ul>
+    </div>
+  </section>
+  <section>
+    <h2>Control Block</h2>
+    <ul>
+      <li class="fragment">Proves the UTXO contains the TapScript
+      <li class="fragment">The hashes of the Merkle Proof and the Internal Public Key $P$ are revealed in it
+      <li class="fragment">The Merkle Proof and TapScript are used to compute the Merkle Root $m$
+      <li class="fragment">The Merkle Root is used to calculate the tweak $t$
+      <li class="fragment">The Internal Pubkey $P$ is combined with the Merkle Root $m$ to produce the External Pubkey $Q$
     </ul>
   </section>
   <section>
@@ -804,6 +849,19 @@ print(merkle_root.hex())
     </ul>
   </section>
   <section>
+    <h3>Control Block Serialization</h3>
+    <div class="medhex"><code class="brown">c0</code><code class="blue">cd04c1bf88ca891af152fc57c36523ab59efb16b7ec07caca0cfc4a1f2051d9e</code>
+        <code class="yellow">76f5c1cdfc8b07dc8edca5bef2b4991201c5a0e18b1dbbcfe00ef2295b8f6dffaf5548715217f7a892c7c5ff787a97b6e2f123287a1a354fe3ccda09c39d5d73</code>
+      <div class="container">
+        <ul>
+          <li><code class="brown">c0</code> - Version
+          <li><code class="blue">cd04…9e</code> - Internal Pubkey $P$
+          <li><code class="yellow">76f5…73</code> - Merkle Proof
+        </ul>
+      </div>
+    </div>
+  </section>
+  <section>
     <h2>Merkle Proof Verification Algorithm</h2>
     <ul>
       <li class="fragment">Hash the TapScript version and the TapScript to get the TapLeaf's hash
@@ -811,7 +869,6 @@ print(merkle_root.hex())
       <li class="fragment">Hash the current hash and the next Merkle Proof hash sorted, until there are no hashes left
       <li class="fragment">The result is the Merkle Root $m$. Then compute the tweak: $t=\mathcal{H}(P||m)$ where $\mathcal{H}$ is <code>hash_taptweak</code>
       <li class="fragment">Internal Public Key $P$ is used to compute external public key $Q=P+tG$. If Q matches the UTXO, TapScript is valid.
-      <li class="fragment">Verify the other elements of Witness satisfy the TapScript
     </ul>
   </section>
   <section>
@@ -863,7 +920,6 @@ print(merkle_root.hex())
       </ul>
     </div>
   </section>
-
   <section>
     <h2>Control Block Validation Example</h2>
     <pre><code data-trim data-noescape class="python">
@@ -898,7 +954,7 @@ print(p.p2tr_address(m, network="signet"))
     </ol>
   </section>
   <section>
-    <h2>Exercise 9</h2>
+    <h2>Exercise 10</h2>
     Create a Signet P2TR address with these Script Spend conditions:
 
     <ol>
@@ -909,6 +965,8 @@ print(p.p2tr_address(m, network="signet"))
       <li>Leaf 2 uses this xonly pubkey: <code>331a8f...74aeec</code>
       <li>Leaf 3 uses this xonly pubkey: <code>158a49...8ff16f</code>
     </ol>
+
+     Submit your address at <a href="https://docs.google.com/spreadsheets/d/1BHqFAzgfThrf64q9pCinwTd7FitJrL5Is3HHBR3UyeI/edit?usp=sharing">this link</a>.
   </section>
 </section>
 </div>

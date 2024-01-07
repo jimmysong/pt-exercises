@@ -55,8 +55,8 @@ class Witness:
         return Script.parse(BytesIO(encode_varstr(raw_tap_script)))
 
     def tap_leaf(self):
-        leaf_version = self.control_block().tapleaf_version
-        return TapLeaf(self.tap_script(), leaf_version)
+        version = self.control_block().version
+        return TapLeaf(self.tap_script(), version)
 
     @classmethod
     def parse(cls, s):

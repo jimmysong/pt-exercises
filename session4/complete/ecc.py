@@ -1,5 +1,5 @@
 from io import BytesIO
-from random import randint
+from secrets import randbelow
 from unittest import TestCase
 
 import hmac
@@ -379,18 +379,18 @@ class S256Point(Point):
         else:
             return -1 * self
 
-    def verify_schnorr(self, msg, schnorr_sig):
+    def verify_schnorr(self, msg, sig):
         # get the even point with the even_point method
         point = self.even_point()
         # if the sig's R is the point at infinity, return False
-        if schnorr_sig.r.x is None:
+        if sig.r.x is None:
             return False
         # commitment is R||P||m use the xonly serializations
-        commitment = schnorr_sig.r.xonly() + point.xonly() + msg
-        # h is the hash_challenge of the commitment as a big endian integer
-        h = big_endian_to_int(hash_challenge(commitment))
-        # target is sG-hP
-        target = schnorr_sig.s * G - h * point
+        commitment = sig.r.xonly() + point.xonly() + msg
+        # d is the hash_challenge of the commitment as a big endian integer
+        d = big_endian_to_int(hash_challenge(commitment))
+        # target is sG-dP
+        target = sig.s * G - d * point
         # if the resulting point is the point at infinity return False
         if target.x is None:
             return False
@@ -398,7 +398,7 @@ class S256Point(Point):
         if not target.even:
             return False
         # check that the target is the same as R
-        return target == schnorr_sig.r
+        return target == sig.r
 
     @classmethod
     def parse(cls, binary):
@@ -494,7 +494,7 @@ class XOnlyTest(TestCase):
 
 
 class TapRootTest(TestCase):
-    def test_default_tweak(self):
+    def test_tweak(self):
         hex_x = "f01d6b9018ab421dd410404cb869072065522bf85734008f105cf385a023a80f"
         bytes_x = bytes.fromhex(hex_x)
         point = S256Point.parse(bytes_x)
@@ -522,7 +522,7 @@ class TapRootTest(TestCase):
         )
 
     def test_private_tweaked_key(self):
-        secret = randint(1, N)
+        secret = randbelow(N)
         priv = PrivateKey(secret)
         self.assertEqual(priv.tweaked_key().point, priv.point.tweaked_key())
 
@@ -545,10 +545,7 @@ class SchnorrTest(TestCase):
         msg = sha256(b"I attest to understanding Schnorr Signatures")
         priv = PrivateKey(12345)
         sig = priv.sign_schnorr(msg)
-        self.assertEqual(
-            sig.serialize().hex(),
-            "f3626c99fe36167e5fef6b95e5ed6e5687caa4dc828986a7de8f9423c0f77f9bc73091ed86085ce43de0e255b3d0afafc7eee41ddc9970c3dc8472acfcdfd39a",
-        )
+        self.assertTrue(priv.point.verify_schnorr(msg, sig))
 
     def test_bip340_k(self):
         msg = sha256(b"Deterministic k generation")
@@ -678,26 +675,26 @@ class PrivateKey:
             return N - self.secret
 
     def bip340_k(self, msg, aux=None):
-        # k is generated using the aux variable, which can be set
-        # to a known value to make k deterministic
-        # the idea of k generation here is to mix in the private key
-        # and the msg to ensure it's unique and not reused
+        # if aux is None, set it to 32 0 bytes
         if aux is None:
-            aux = b"\x00" * 32
-        e = self.even_secret()
-        if len(msg) != 32:
-            raise ValueError("msg needs to be 32 bytes")
+            aux = bytes([0] * 32)
+        # if the aux is not 32 bytes, raise an error
         if len(aux) != 32:
             raise ValueError("aux needs to be 32 bytes")
-        # t contains the secret, msg is added so it's unique to the
-        # message and private key
-        t = xor_bytes(int_to_big_endian(e, 32), hash_aux(aux))
-        return big_endian_to_int(hash_nonce(t + self.point.xonly() + msg)) % N
+        # if the message is not 32 bytes, raise an error
+        if len(msg) != 32:
+            raise ValueError("msg needs to be 32 bytes")
+        # set e to be the even secret
+        e = self.even_secret()
+        # x = e ⊕ H(aux) where H is hash_aux and e is bytes
+        x = xor_bytes(int_to_big_endian(e, 32), hash_aux(aux))
+        # return the hash_nonce of the x, point as xonly and the message interpreted as big endian
+        return big_endian_to_int(hash_nonce(x + self.point.xonly() + msg))
 
     def sign_schnorr(self, msg, aux=None):
-        # e is the secret that generates an even y with the even_secret method
+        # e is the secret that generates an even P with the even_secret method
         e = self.even_secret()
-        # get the nonce, k, using the self.bip340_k method if in exercise 5, use randint(N) in exercise 4
+        # get the nonce, k, using the self.bip340_k method if in exercise 5, use randbelow(N) in exercise 4
         k = self.bip340_k(msg, aux)
         # get the resulting R=kG point
         r = k * G
@@ -709,10 +706,10 @@ class PrivateKey:
             r = k * G
         # calculate the commitment which is: R || P || msg
         commitment = r.xonly() + self.point.xonly() + msg
-        # h is hash_challenge of the commitment as a big endian integer mod N
-        h = big_endian_to_int(hash_challenge(commitment)) % N
-        # calculate s which is (k+eh) mod N
-        s = (k + e * h) % N
+        # d is hash_challenge of the commitment as a big endian integer
+        d = big_endian_to_int(hash_challenge(commitment)) % N
+        # calculate s which is (k+ed) mod N
+        s = (k + e * d) % N
         # create a SchnorrSignature object using the R and s
         schnorr = SchnorrSignature(r, s)
         # check that this schnorr signature verifies

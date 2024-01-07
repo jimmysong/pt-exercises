@@ -12,8 +12,9 @@
 >>> from tx import TxIn, TxOut, Tx
 >>> my_secret = 21000000
 >>> me = MuSigParticipant(PrivateKey(my_secret))
+>>> my_pubkey = me.point
 >>> neighbor_pubkey = S256Point.parse(bytes.fromhex("029addad123cfcfa19c501dd1f15ca93b74a57ef88aa34035470dd46e54b5931c6"))
->>> pubkeys = [me.point, neighbor_pubkey]
+>>> pubkeys = [my_pubkey, neighbor_pubkey]
 >>> keyagg = KeyAggregator(pubkeys)
 >>> group_point = keyagg.group_point
 >>> ts = TapScript([group_point.xonly(), 0xAC])
@@ -33,11 +34,11 @@
 >>> print(my_nonce_share.serialize().hex())
 02051d617f5d3cf975e3a2fae4e812927fa5d239d7a14615ecdb86b3131c520325031f7e92929762fc2f052e8085b149f96b206517886b9e01deade37eddfdd1b984
 >>> neighbor_share = NoncePublicShare.parse(bytes.fromhex("02d8ffef7503cec7a5046d238f53d5f599e57772813aa8b4c1cbd017a453fbcd25026bc7edd0264573f8e90e2f1d6753b0004010d8d1c235f5f1c44995f5376a0e81"))
->>> coor.register_nonce_share(me.point.sec(), my_nonce_share)
+>>> coor.register_nonce_share(my_pubkey.sec(), my_nonce_share)
 >>> coor.register_nonce_share(neighbor_pubkey.sec(), neighbor_share)
 >>> context = coor.create_signing_context(msg)
 >>> my_partial_sig = me.sign(context)
->>> coor.register_partial_sig(me.point.sec(), my_partial_sig)
+>>> coor.register_partial_sig(my_pubkey.sec(), my_partial_sig)
 >>> print(my_partial_sig.hex())
 1b61c7bc63a1c31c8e351613d55b362dd1003c31b326ca561b6c2b5cdc457a41
 >>> neighbor_sig = bytes.fromhex("82420b4a9accb4392eb850cb1853849a03a35711f3d7ae112eff9fd3214bc538")
@@ -138,8 +139,9 @@ BONUS! Don't do this one unless you finished the previous exercise and have time
 >>> from witness import Witness
 >>> my_secret = big_endian_to_int(sha256(b"jimmy@programmingblockchain.com"))  #/my_secret = big_endian_to_int(sha256(b"<my email address>"))
 >>> me = MuSigParticipant(PrivateKey(my_secret))
+>>> my_pubkey = me.point
 >>> neighbor_pubkey = S256Point.parse(bytes.fromhex("02e79c4eb45764bd015542f6779cc70fef44b7a2432f839264768288efab886291"))  #/neighbor_pubkey = S256Point.parse(bytes.fromhex("<my neighbor's sec pubkey>"))
->>> pubkeys = [me.point, neighbor_pubkey]
+>>> pubkeys = [my_pubkey, neighbor_pubkey]
 >>> keyagg = KeyAggregator(pubkeys)
 >>> group_point = keyagg.group_point
 >>> tap_script = TapScript([group_point.xonly(), 0xAC])
@@ -215,10 +217,10 @@ True
 >>> coefficients = [21000000, 11111111, 2222222]
 >>> shares = {}
 >>> for x in range(1, 6):
-...    y_value = 0
-...    for i, coef in enumerate(coefficients):
-...        y_value += coef * x ** i % N
-...    shares[x] = y_value % N
+...     y_value = 0
+...     for i, coef in enumerate(coefficients):
+...         y_value += coef * x ** i % N
+...     shares[x] = y_value % N
 >>> print(shares[5])
 132111105
 
@@ -281,13 +283,21 @@ Create a LaGrange polynomial of degree 4 where $X=\{2,5,8,9\}$ for participant 8
 
 ----
 >>> from ecc import N
->>> def g(x):
-...     participants = [2, 5, 8, 9]
-...     x_i = 8
-...     product = 1
-...     for x_j in participants:
-...         if x_j != x_i:
-...             product *= (x-x_j) * pow(x_i - x_j, -1, N) % N
+>>> # define g(x) to be the LaGrange polynomial
+>>> def g(x):  #/
+...     # define the participants to be [2, 5, 8, 9]
+...     participants = [2, 5, 8, 9]  #/
+...     # define the place where we want 1 to be x_i
+...     x_i = 8  #/
+...     # set the product to 1
+...     product = 1  #/
+...     # loop through the participants x_j
+...     for x_j in participants:  #/
+...         # if this one is not the place where it's 1, multiply the product
+...         if x_j != x_i:  #/
+...             # multiply by (x - x_j) / (x_i - x_j), division needs to use field division, that is, multiply by pow(a, -1, N)
+...             product *= (x-x_j) * pow(x_i - x_j, -1, N) % N  #/
+...     # return the product mod N
 ...     return product % N
 >>> print(g(2), g(5), g(8), g(9), g(0))
 0 0 1 0 5
@@ -435,7 +445,7 @@ frost:DealerTest:test_create_signer:
 ... else:
 ...     e = N - signers[1].private_key.secret
 >>> c = lagrange_coef(participants, 1)
->>> d = context.challenge()
+>>> d = context.challenge
 >>> s = (k + c * d * e) % N
 >>> print(hex(s))
 0x32ec8d7a6b941b80bdf97deb231a9710583e6656e32e69e7aabf00e6e81153fb
@@ -474,7 +484,7 @@ frost:DealerTest:test_create_signer:
 ... else:
 ...     p = -1 * signers[1].point
 >>> c = lagrange_coef(participants, 1)
->>> d = context.challenge()
+>>> d = context.challenge
 >>> print(s * G == (r + c * d * p))
 True
 
@@ -506,7 +516,7 @@ Participant 2's $l$ and $m$: 5000, 6000
 >>> participant_2.private_nonce_share = nonce_share_2
 >>> coor.register_nonce_share(1, nonce_share_1.public_share)
 >>> coor.register_nonce_share(2, nonce_share_2.public_share)
->>> # create the signing context, which should aggregate the points
+>>> # create the signing context
 >>> context = coor.create_signing_context(msg)  #/
 >>> # determine the second participant's nonce (k_i) from the nonce point's evenness
 >>> if context.nonce_point.even:  #/
@@ -519,10 +529,10 @@ Participant 2's $l$ and $m$: 5000, 6000
 ... else:  #/
 ...     y = N - participant_2.private_key.secret  #/
 >>> # use the lagrange_coef function to get the lagrange coefficient (c_i = g_i(x_i))
->>> c = lagrange_coef(participants, 2)
+>>> c = lagrange_coef(participants, 2)  #/
 >>> # use the context's challenge method to get the group challenge (d = H(R||P||z))
->>> d = context.challenge()  #/
->>> # now get the partial signature s_i = k + c_i * d * y_i
+>>> d = context.challenge  #/
+>>> # now get the partial signature s_i = k + c_i * d * y_i mod N
 >>> s = (k + c * d * y) % N  #/
 >>> # print the hex of the partial signature
 >>> print(hex(s))  #/
@@ -566,7 +576,7 @@ Verify the partial signature for participant 2
 >>> # get the LaGrange coefficient (c_i) for the second participant
 >>> c = lagrange_coef(participants, 2)  #/
 >>> # get the challenge for the group (d)
->>> d = context.challenge()  #/
+>>> d = context.challenge  #/
 >>> # check if s_i * G == R + c * d * P
 >>> print(s * G == r + c * d * p)  #/
 True
@@ -676,7 +686,7 @@ frost:PartialSigTest:test_sign:
 >>> s_1 = big_endian_to_int(my_partial_sig)
 >>> s_2 = big_endian_to_int(neighbor_sig)
 >>> s = (s_1 + s_2) % N
->>> d = context.challenge()
+>>> d = context.challenge
 >>> t = coor.tweak_amount
 >>> if context.group_point.even:
 ...     s = (s + d * t) % N
@@ -701,6 +711,7 @@ frost:PartialSigTest:test_compute_sig:
 FUNCTIONS = """
 frost.lagrange
 frost.lagrange_coef
+frost.recover_secret
 frost.Dealer.create_signer
 frost.FrostCoordinator.compute_sig
 frost.FrostSigner.sign

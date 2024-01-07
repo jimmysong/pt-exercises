@@ -167,7 +167,7 @@ print(tx_obj.serialize().hex())
       <li class="fragment">Produce a Schnorr signature $(R,s)$ from a group of n public keys, $P_1, P_2, ..., P_n$ and present a single public key $P$ to satisfy $R=sG−dP$
       <li class="fragment">Each participant has its own secret $e_i G = P_i$
       <li class="fragment">We create a Group Commitment $L = H(P_1||P_2||...||P_n)$
-      <li class="fragment">Each Public key gets its own coefficient, $c_i = H(L, P_i)$
+      <li class="fragment">Each Public key gets its own keyagg coefficient, $c_i = H(L, P_i)$
       <li class="fragment">The Group Public Key, $P = c_1P_1 + c_2P_2... + c_nP_n$
     </ul>
   </section>
@@ -214,7 +214,7 @@ print(p.sec().hex())
     </ul>
   </section>
   <section>
-    <h2>Example TapLeaf Hash</h2>
+    <h2>Example BIP327 Key Aggregation</h2>
     <pre><code data-trim data-noescape class="python">
 # creating a BIP327 group public key
 from ecc import S256Point
@@ -245,8 +245,6 @@ print(p.sec().hex())
     <h2>Exercises</h2>
     <ol start="3">
       <li>Create a group public key for the 6 public keys using BIP327
-      <li>Make this test pass:
-        <code>musig:KeyAggTest:test_compute_group_commitment</code>
       <li>Make this test pass:
         <code>musig:KeyAggTest:test_compute_group_point</code>
       <li>Create a 2-of-2 BIP327 public key sharing a key with your neighbor.
@@ -311,7 +309,7 @@ print(hex(k))
   </section>
   <section>
     <h2>Exercises</h2>
-    <ol start="8">
+    <ol start="6">
       <li>Calculate the $k$ for the participant given the group point, message and other data.
       <li>Make this test pass: <code>musig:NonceAggTest:test_compute_nonce_point</code>
       <li>Create a nonce for the aggregate key you created with your neighbor earlier for the message "Love thy neighbor"
@@ -339,8 +337,8 @@ print(hex(k))
       <li class="fragment">Keyagg coefficient $c_i = H(L || P_i)$ and the challenge $d=H(R,P,z)$ are computed from the signing context
       <li class="fragment">Partial sig is $s_i = k_i + c_i d e_i$ where $e_i$ is the secret
       <li class="fragment">Coordinator aggregates $s = s_1 + s_2 + ... + s_n$
-      <li class="fragment">If $R$ is odd, participant uses $N-k_i$ for signing because $-R_i=-k_iG$ and $R=\sum{R_i}$
-      <li class="fragment">If $P$ is odd, participant uses $N-e_i$ for signing because $-P_i=-e_iG$ and $P=\sum{c_iP_i}$
+      <li class="fragment">If $R$ is odd, participant uses $N-k_i$ for signing because $-R_i=-k_iG$ and $-R=\sum{-R_i}$
+      <li class="fragment">If $P$ is odd, participant uses $N-e_i$ for signing because $-P_i=-e_iG$ and $-P=\sum{-c_iP_i}$
     </ul>
   </section>
   <section>
@@ -357,25 +355,28 @@ print(hex(k))
     <pre><code data-trim data-noescape class="python">
 from ecc import N, PrivateKey
 from musig import SigningContext, MuSigParticipant, MuSigCoordinator
+participant_1 = MuSigParticipant(PrivateKey(1000))
+participant_2 = MuSigParticipant(PrivateKey(2000))
 msg = b"MuSig2 is awesome!"
-participants = [MuSigParticipant(PrivateKey(i * 1000)) for i in range(1, 7)]
-pubkeys = [p.point for p in participants]
+nonce_share_1 = participant_1.generate_nonce_share(msg=msg, rand=b'')
+nonce_share_2 = participant_2.generate_nonce_share(msg=msg, rand=b'')
+pubkeys = [participant_1.point, participant_2.point]
 coor = MuSigCoordinator(pubkeys)
-for p in participants:
-    nonce_share = p.generate_nonce_share(rand=b'')
-    coor.register_nonce_share(p.point.sec(), nonce_share)
+coor.register_nonce_share(participant_1.point.sec(), nonce_share_1)
+coor.register_nonce_share(participant_2.point.sec(), nonce_share_2)
 context = coor.create_signing_context(msg)
 if context.nonce_point.even:
-    k = participants[0].my_nonce(context.nonce_coef())
+    k = participant_1.nonce(context.nonce_coef())
 else:
-    k = N - participants[0].my_nonce(context.nonce_coef())
+    k = N - participant_1.nonce(context.nonce_coef())
 if context.group_point.even:
-    e = participants[0].private_key.secret
+    e = participant_1.private_key.secret
 else:
-    e = N - participants[0].private_key.secret
-c = context.keyagg_coef(participants[0].point)
+    e = N - participant_1.private_key.secret
+c = context.keyagg_coef(participant_1.point)
 d = context.challenge()
-partial_sig = (k + c * d * e) % N
+s = (k + c * d * e) % N
+print(hex(s))
     </code></pre>
   </section>
   <section>
@@ -385,21 +386,19 @@ from ecc import G, N, PrivateKey
 from musig import SigningContext, MuSigParticipant, MuSigCoordinator
 participant_1 = MuSigParticipant(PrivateKey(1000))
 participant_2 = MuSigParticipant(PrivateKey(2000))
-msg = b"Hello World!"
-nonce_share_1 = NoncePrivateShare(3000, 4000, participant_1.point)
-nonce_share_2 = NoncePrivateShare(5000, 6000, participant_2.point)
-participant_1.private_share = nonce_share_1
-participant_2.private_share = nonce_share_2
+msg = b"MuSig2 is awesome!"
+nonce_share_1 = participant_1.generate_nonce_share(msg=msg, rand=b'')
+nonce_share_2 = participant_2.generate_nonce_share(msg=msg, rand=b'')
 pubkeys = [participant_1.point, participant_2.point]
 coor = MuSigCoordinator(pubkeys)
-coor.register_nonce_share(participant_1.point.sec(), nonce_share_1.public_share)
-coor.register_nonce_share(participant_2.point.sec(), nonce_share_2.public_share)
+coor.register_nonce_share(participant_1.point.sec(), nonce_share_1)
+coor.register_nonce_share(participant_2.point.sec(), nonce_share_2)
 context = coor.create_signing_context(msg)
-s = 0x1aad95d9490e4b8599377ff6a546a1d075fb4242c749dbcbc010589e23c21776
+s = 0xa5aa0ae6ba94c1d8948929b7422d14869476011f4a5904c8f46b276396d4051a
 if context.nonce_point.even:
-    r = nonce_share_1.public_share.nonce_point(context.nonce_coef())
+    r = nonce_share_1.nonce_point(context.nonce_coef())
 else:
-    r = -1 * nonce_share_1.public_share.nonce_point(context.nonce_coef())
+    r = -1 * nonce_share_1.nonce_point(context.nonce_coef())
 if context.group_point.even:
     p = participant_1.point
 else:
@@ -411,7 +410,7 @@ print(s * G == r + c * d * p)
   </section>
   <section>
     <h2>Exercises</h2>
-    <ol start="11">
+    <ol start="9">
       <li>Create a partial signature according to the terms of the exercise.
       <li>Verify the partial signature according to the terms of the exercise
       <li>Aggregate the partial signatures and verify against the group pubkey
@@ -423,7 +422,7 @@ print(s * G == r + c * d * p)
   </section>
   <section>
     <h2>Exercises</h2>
-    <ol start="16">
+    <ol start="14">
       <li>Trade partial signatures with your neighbor and verify for the message from Exercise 10.
     </ol>
   </section>
@@ -513,12 +512,12 @@ print(context.group_point.verify_schnorr(msg, sig))
   </section>
   <section>
     <h2>Exercises</h2>
-    <ol start="17">
+    <ol start="15">
       <li>Aggregate and verify partial signatures according to the terms of the exercise.
       <li>Make this test pass:
         <code>musig:PartialSigTest:test_compute_sig</code>
       <li>Do the same as exercise 16, sign the message "Love thy neighbor", exchange the partial sigs, combine the sigs and verify, but with a merkle root.
-      <li>Generate an address between yourself and your neighbor where the keypath spend is a 2-of-2 MuSig and the ScriptPath spend is also a 2-of-2 MuSig as the only TapScript.
+      <li>Generate an address between yourself and your neighbor where the keypath spend is a 2-of-2 MuSig and the ScriptPath spend is also a 2-of-2 MuSig as the only TapScript. Submit your address at <a href="https://docs.google.com/spreadsheets/d/1BHqFAzgfThrf64q9pCinwTd7FitJrL5Is3HHBR3UyeI/edit?usp=sharing">this link</a>.
     </ol>
   </section>
 </section>

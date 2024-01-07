@@ -60,7 +60,7 @@
     <ul>
       <li class="fragment">Conceptually Simpler
       <li class="fragment">ECDSA uses DER, which is 72-73 bytes, Schnorr uses 64
-      <li class="fragment">Fewer Elliptic Curve Operations (we use custom hashes)
+      <li class="fragment">Fewer Elliptic Curve Operations (we use tagged hashes)
       <li class="fragment">Key Aggregation/Signature Aggregation/Batch Verification
     </ul>
   </section>
@@ -101,7 +101,7 @@
     <h2>Schnorr vs. ECDSA</h2>
     <ul>
       <li class="fragment">Uses a hash function instead of field division
-      <li class="fragment">That hash can commit to everything at once, instead of just one per variable. $H(a||b||c||...)$
+      <li class="fragment">That hash can commit to everything at once, instead of just one per variable. $\mathcal{H}(a||b||c||...)$
       <li class="fragment">Target is a point on the curve $R$, not just the $x$ coordinate
       <li class="fragment">Aggregation of keys and signatures now possible!
       <li class="fragment">Batch verification possible!
@@ -278,7 +278,7 @@ print(hex(k))
     <ul>
       <li class="fragment">Defined in BIP341
       <li class="fragment">Segwit v1, triggered by 32-bytes and a 1 in script
-      <li class="fragment">Every address can bo spent both as a single-signature or as an arbitrary script
+      <li class="fragment">Every address can be spent both as a single-signature or as an arbitrary script
       <li class="fragment">Adds privacy through only revealing the single spending condition
       <li class="fragment">Adds Schnorr Signatures
     </ul>
@@ -368,7 +368,7 @@ print(hex(k))
       <li class="fragment">Tweak $t$ and $P$ create $Q$, the external pubkey
       <li class="fragment">$t=\mathcal{H}(P||m)$ where $\mathcal{H}$ is <code>hash_taptweak</code>
       <li class="fragment">$Q=P+tG$, and $eG=P$ which means $Q=eG+tG$ and $Q=(e+t)G$
-      <li class="fragment">$e+t$ is your private key, whose public key is $Q$
+      <li class="fragment">$e+t$ is the private key for public key $Q$
       <li class="fragment">Witness has a single element, the Schnorr Signature
       <li class="fragment">If you don't want a script path, $m$ is the empty string
     </ul>
@@ -394,8 +394,9 @@ print(script_pubkey)
     <h2>Exercises</h2>
     <ol start="8">
       <li>Make a P2TR ScriptPubKey with no Script Path using the private key 9284736473
-      <li>Make this test pass: <code>ecc:TapRootTest:test_default_tweak</code>
+      <li>Make this test pass: <code>ecc:TapRootTest:test_tweak</code>
       <li>Make this test pass: <code>ecc:TapRootTest:test_tweaked_key</code>
+      <li>Make this test pass: <code>ecc:TapRootTest:test_private_tweaked_key</code>
       <li>Make this test pass: <code>ecc:TapRootTest:test_p2tr_script</code>
     </ol>
   </section>
@@ -428,8 +429,7 @@ print(p.p2tr_address(network="signet"))
   </section>
   <section>
     <h2>Exercise</h2>
-    <ol start="12">
-      <li>Make this test pass: <code>ecc:TapRootTest:test_private_tweaked_key</code>
+    <ol start="13">
       <li>Make your own Signet P2TR Address! Add your address at <a href="https://docs.google.com/spreadsheets/d/1BHqFAzgfThrf64q9pCinwTd7FitJrL5Is3HHBR3UyeI/edit?usp=sharing">on this spreadsheet</a>
     </ol>
   </section>

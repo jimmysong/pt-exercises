@@ -661,12 +661,12 @@ class PrivateKey:
             return N - self.secret
 
     def bip340_k(self, msg, aux=None):
-        # k is generated using the aux variable, which can be set
-        # to a known value to make k deterministic
-        # the idea of k generation here is to mix in the private key
-        # and the msg to ensure it's unique and not reused
-        # t contains the secret, msg is added so it's unique to the
-        # message and private key
+        # if aux is None, set it to 32 0 bytes
+        # if the aux is not 32 bytes, raise an error
+        # if the message is not 32 bytes, raise an error
+        # set e to be the even secret
+        # x = e ⊕ H(aux) where H is hash_aux and e is bytes
+        # return the hash_nonce of the x, point as xonly and the message interpreted as big endian
         raise NotImplementedError
 
     def sign_schnorr(self, msg, aux=None):

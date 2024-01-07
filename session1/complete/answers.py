@@ -10,7 +10,7 @@
 * $d$ challenge, $d=\mathcal{H}(R||P||z)$
 * Signature is $(R,s)$ where $s=k + e d$
 * Verify $R=sG-dP$
-* $$sG-dP =(k+e d)G-dP =kG+d(eG)-dP=R+dP-dP=R$$
+* $=(k+e d)G-dP =kG+d(eG)-dP=R+dP-dP=R$
 #endmarkdown
 #code
 >>> from ecc import S256Point, SchnorrSignature, G, N
@@ -22,7 +22,7 @@
 >>> xonly = bytes.fromhex("a8a28557947025fe0646660677c09a757a3bce148d99fac9368439a13df6ea1a")
 >>> p = S256Point.parse(xonly)
 >>> commitment = sig.r.xonly() + p.xonly() + msg
->>> d = big_endian_to_int(hash_challenge(commitment)) % N
+>>> d = big_endian_to_int(hash_challenge(commitment))
 >>> target = sig.s * G - d * p
 >>> print(target == sig.r)
 True
@@ -60,7 +60,7 @@ ecc:SchnorrTest:test_verify:
 #markdown
 # Schnorr Signing
 * $eG=P$, $m$ message, $k$ random
-* $kG=R$, $H$ is <code>hash_challenge</code.
+* $kG=R$, $H$ is <code>hash_challenge</code>.
 * $s=k+e H(R||P||m)$ where $R$ and $P$ are $x$-only
 * Signature is $(R,s)$
 #endmarkdown
@@ -78,7 +78,7 @@ ecc:SchnorrTest:test_verify:
 ...     k = N - k
 ...     r = k * G
 >>> challenge = r.xonly() + priv.point.xonly() + msg
->>> d = big_endian_to_int(hash_challenge(challenge)) % N
+>>> d = big_endian_to_int(hash_challenge(challenge))
 >>> s = (k + e * d) % N
 >>> sig = SchnorrSignature(r, s)
 >>> if not priv.point.verify_schnorr(msg, sig):
@@ -100,7 +100,7 @@ Sign the message b"Schnorr Signatures adopt Taproot" with the private key 21,000
 >>> msg = b"Schnorr Signatures adopt Taproot"
 >>> k = 987654321
 >>> # get e using the even_secret method on the private key
->>> e = priv.even_secret() #/
+>>> e = priv.even_secret()  #/
 >>> # calculate the nonce point R which is kG
 >>> r = k * G  #/
 >>> # if R's not even, negate the k and recalculate R
@@ -111,8 +111,8 @@ Sign the message b"Schnorr Signatures adopt Taproot" with the private key 21,000
 ...     r = k * G  #/
 >>> # calculate the commitment which is: R || P || msg
 >>> commitment = r.xonly() + priv.point.xonly() + msg  #/
->>> # d is the hash_challenge of the commitment as a big endian integer mod N
->>> d = big_endian_to_int(hash_challenge(commitment)) % N  #/
+>>> # d is the hash_challenge of the commitment as a big endian integer
+>>> d = big_endian_to_int(hash_challenge(commitment))  #/
 >>> # calculate s = (k+ed) mod N
 >>> s = (k + e * d) % N  #/
 >>> # create a SchnorrSignature object using the R and s
@@ -149,7 +149,7 @@ ecc:SchnorrTest:test_sign:
 >>> e = private_key.even_secret()
 >>> msg = sha256(b"Nonce generation is spectacular!")
 >>> x = xor_bytes(int_to_big_endian(e, 32), hash_aux(aux))
->>> k = big_endian_to_int(hash_nonce(x + p.xonly() + msg)) % N
+>>> k = big_endian_to_int(hash_nonce(x + p.xonly() + msg))
 >>> print(hex(k))
 0x862c62948caca77dc46ef04e3124c0542d838ae79172d5709a9edfb799c67e58
 
@@ -167,13 +167,13 @@ Sign the message b"Secure Deterministic Nonce made!" with the private key 837,12
 >>> point = priv.point
 >>> msg = b"Secure Deterministic Nonce made!"
 >>> # get e using the even_secret method on the private key
->>> e = priv.even_secret() #/
+>>> e = priv.even_secret()  #/
 >>> # use the 32-bytes of 0's for the auxillary
->>> a = bytes([0] * 32) #/
+>>> a = bytes([0] * 32)  #/
 >>> # x=e⊕H(a) where ⊕ is xor_bytes, H is hash_aux and a is the auxillary
->>> x = xor_bytes(int_to_big_endian(e, 32), hash_aux(a)) #/
+>>> x = xor_bytes(int_to_big_endian(e, 32), hash_aux(a))  #/
 >>> # k=H(x||P||z) where H is hash_nonce, P is the xonly of the point and z is the message
->>> k = big_endian_to_int(hash_nonce(x + point.xonly() + msg)) % N #/
+>>> k = big_endian_to_int(hash_nonce(x + point.xonly() + msg))  #/
 >>> # calculate R which is kG
 >>> r = k * G  #/
 >>> # if R is not even negate the k
@@ -184,7 +184,7 @@ Sign the message b"Secure Deterministic Nonce made!" with the private key 837,12
 ...     r = k * G  #/
 >>> # calculate the commitment which is: R || P || msg
 >>> commitment = r.xonly() + point.xonly() + msg  #/
->>> # d=H(commitment) where H is the hash_challenge
+>>> # d is the hash_challenge of the commitment as a big endian integer
 >>> d = big_endian_to_int(hash_challenge(commitment)) % N  #/
 >>> # s=(k+ed) mod N
 >>> s = (k + e * d) % N  #/
@@ -244,7 +244,7 @@ Message 2 = af1c325abcb0cced3a4166ce67be1db659ae1dd574fe49b0f2941d8d4882d62c
 >>> # create the commitments: R_i||P_i||m_i
 >>> commitment_1 = sig1.r.xonly() + p1.xonly() + msg1  #/
 >>> commitment_2 = sig2.r.xonly() + p2.xonly() + msg2  #/
->>> # d_i are the challenges which are hash_challenge of the commitments as big endian ints mod N
+>>> # d_i are the challenges which are hash_challenge of the commitments as big endian integers
 >>> d1 = big_endian_to_int(hash_challenge(commitment_1)) % N  #/
 >>> d2 = big_endian_to_int(hash_challenge(commitment_2)) % N  #/
 >>> # d is the sum of the d_i P_i's
@@ -260,7 +260,7 @@ True
 * Tweak $t$ and $P$ create $Q$, the external pubkey
 * $t=\mathcal{H}(P||m)$ where $\mathcal{H}$ is <code>hash_taptweak</code>
 * $Q=P+tG$, and $eG=P$ which means $Q=eG+tG$ and $Q=(e+t)G$
-* $e+t$ is your private key, whose public key is $Q$
+* $e+t$ is the private key for the public key $Q$
 * Witness has a single element, the Schnorr Signature
 * If you don't want a script path, $m$ is the empty string
 #endmarkdown
@@ -306,7 +306,7 @@ OP_1 a6b9f4b7999f9c6de76165342c9feac354d5d3062a41761ed1616eaf9e3c38ec
 
 #endexercise
 #unittest
-ecc:TapRootTest:test_default_tweak:
+ecc:TapRootTest:test_tweak:
 #endunittest
 #unittest
 ecc:TapRootTest:test_tweaked_key:
@@ -341,7 +341,7 @@ tb1p27zyfdq3yahwu9lz76vc35vjklnj3aph25j6s68548pt0rsj4utqgavay9
 
 Make your own Signet P2TR Address
 
-Submit your address at [this link]()
+Submit your address at [this link](https://docs.google.com/spreadsheets/d/1BHqFAzgfThrf64q9pCinwTd7FitJrL5Is3HHBR3UyeI/edit?usp=sharing)
 
 ----
 >>> from ecc import PrivateKey

@@ -14,8 +14,8 @@ The two concepts that you'll learn here are tagged hashes and x-only pubkeys. Th
 #markdown
 # Tagged Hashes - Motivation
 * We want to use different hash functions so we don't get unnecessary Hash reuse
-* We don't want to create a brand new hash functions, so we use sha256
-* We use a different hash function for each context and we define each hash function like this.
+* We don't want to create a brand new hash functions, so we re-use sha256
+* We use a different tagged hash function for each context and we define each tagged hash function.
 
 #endmarkdown
 #markdown
@@ -23,7 +23,7 @@ The two concepts that you'll learn here are tagged hashes and x-only pubkeys. Th
 * A Tagged Hash uses two rounds of SHA256
 * The first round of SHA256 is a hash of a tag (e.g. "BIP0340/aux")
 * The second round of SHA256 uses the resulting hash twice and also the message
-* H_aux(x) = SHA256(SHA256("BIP0340/aux") + SHA256("BIP0340/aux") + x)
+* `H_aux(x) = SHA256(SHA256("BIP0340/aux") + SHA256("BIP0340/aux") + x)`
 
 #endmarkdown
 #code
@@ -67,17 +67,19 @@ hash:HashTest:test_tagged_hash:
 #endmarkdown
 #markdown
 # $x$-only keys - Motivation
-* Compressed SEC format is 33 bytes, we can Save 1 byte by using $x$-only keys
-* As Schnorr Signatures define a point, we can reduce the size of of those from 72-73 bytes (DER-encoded ECDSA) to 64 bytes
+* Compressed SEC format is 33 bytes, we can save 1 byte in the serialization by using $x$-only keys
+* As Schnorr Signatures have a point for the first part, we can reduce the size of signatures from 72-73 bytes (DER-encoded ECDSA) to 64 bytes
 * The ScriptPubKeys for pay-to-taproot also save a byte to be 34 bytes
 #endmarkdown
 #markdown
 # $x$-only keys - Implementation
 * To get down to 32-bytes, we simply assume that $y$ is even.
 * This would be the same as the Compressed SEC format, but without the initial byte that lets us know whether the $y$ is even or odd.
-* If the secret is $e$ and the point is $eG=P=(x,y)$ and the resulting $y$ is odd, here's what we do.
-* The private key $e$ is flipped to $N-e$ if $y$ is odd
+* If the secret is $e$ and the point is $eG=P=(x,y)$ and the resulting $y$ is odd, we can still sign for the flipped public key.
+* Note that an $x$-only pubkey in the case where y is odd means that we have to sign for $-P$ and not $P$
+* The private key $e$ is negated to $N-e$ if $y$ is odd.
 * $eG=P=(x,y)$ means $(N-e)G=0-eG=-P=(x,-y)$. Since we're in a finite field and the finite field prime $p$ is a prime number greater than 2, $-y=p-y$ is guaranteed to be even (odd minus odd)
+* We thus sign messages with $N-e$ for $-P$
 #endmarkdown
 #code
 >>> # Example X-only pubkey
@@ -117,10 +119,11 @@ ecc:XOnlyTest:test_xonly:
 #markdown
 # $x$-only keys - Observations
 * The savings for $x$-only keys is 1 byte for pubkeys, which trickles to a lot of other serializations (Schnorr Signatures, pay-to-taproot ScriptPubKeys, etc)
-* However, there's now a bigger burden on the developer to "flip" the private key if the public key has an odd $y$
+* However, there's now a bigger burden on the developer to negate the private key if the public key is odd.
 * This also ends up being challenging to account for, especially with respect to aggregated signatures and aggregated pubkeys.
+* The way to think about this is that the pubkey $P$ being odd means that we're really signing for $-P$ and use the negated private key to compensate.
 
-Let's make a useful private-key flipping method in `PrivateKey` and a point flipping method in S256Point
+Let's make a useful private-key flipping method in `PrivateKey` and a point flipping method in `S256Point`
 #endmarkdown
 #unittest
 ecc:XOnlyTest:test_even_methods:

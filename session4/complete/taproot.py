@@ -25,25 +25,25 @@ def sequence_commands(sequence):
 
 
 class TapLeaf:
-    def __init__(self, tap_script, tapleaf_version=0xC0):
+    def __init__(self, tap_script, version=0xC0):
         self.tap_script = tap_script
-        self.tapleaf_version = tapleaf_version
+        self.version = version
 
     def __repr__(self):
-        return f"{self.tapleaf_version:x}:{self.tap_script}"
+        return f"{self.version:x}:{self.tap_script}"
 
     def __eq__(self, other):
         return (
             type(self) is type(other)
-            and self.tapleaf_version == other.tapleaf_version
+            and self.version == other.version
             and self.tap_script == other.tap_script
         )
 
     def hash(self):
-        # calculate what's getting hashed
-        content = int_to_byte(self.tapleaf_version) + self.tap_script.serialize()
-        # return the hash_tapleaf of the content
-        return hash_tapleaf(content)
+        # preimage is version in one byte and the tap script serialized
+        preimage = bytes([self.version]) + self.tap_script.serialize()
+        # return the hash_tapleaf of the preimage
+        return hash_tapleaf(preimage)
 
     def leaves(self):
         return [self]
@@ -63,7 +63,7 @@ class TapLeaf:
         else:
             parity = 1
         return ControlBlock(
-            self.tapleaf_version,
+            self.version,
             parity,
             internal_pubkey,
             self.path_hashes(),
@@ -120,7 +120,7 @@ class TapBranch:
         else:
             parity = 1
         return ControlBlock(
-            leaf.tapleaf_version,
+            leaf.version,
             parity,
             internal_pubkey,
             self.path_hashes(leaf),
@@ -137,21 +137,21 @@ class TapBranch:
 
 
 class ControlBlock:
-    def __init__(self, tapleaf_version, parity, internal_pubkey, hashes):
-        self.tapleaf_version = tapleaf_version
+    def __init__(self, version, parity, internal_pubkey, hashes):
+        self.version = version
         self.parity = parity
         self.internal_pubkey = internal_pubkey
         self.hashes = hashes
 
     def __repr__(self):
-        return f"{self.tapleaf_version}:{self.parity}:{self.internal_pubkey}"
+        return f"{self.version}:{self.parity}:{self.internal_pubkey}"
 
     def __eq__(self, other):
         return self.serialize() == other.serialize()
 
     def merkle_root(self, tap_script):
         # create a TapLeaf from the tap_script and the tapleaf version in the control block
-        leaf = TapLeaf(tap_script, self.tapleaf_version)
+        leaf = TapLeaf(tap_script, self.version)
         # initialize the hash with the leaf's hash
         current = leaf.hash()
         # go through the hashes in self.hashes
@@ -171,7 +171,7 @@ class ControlBlock:
         return self.internal_pubkey.tweaked_key(merkle_root)
 
     def serialize(self):
-        s = int_to_byte(self.tapleaf_version + self.parity)
+        s = int_to_byte(self.version + self.parity)
         s += self.internal_pubkey.xonly()
         for h in self.hashes:
             s += h
@@ -184,12 +184,12 @@ class ControlBlock:
             raise ValueError("There should be 32*m+1 bytes where m is an integer")
         if b_len < 33 or b_len > 33 + 128 * 32:
             raise ValueError(f"length is outside the bounds {b_len}")
-        tapleaf_version = b[0] & 0xFE
+        version = b[0] & 0xFE
         parity = b[0] & 1
         internal_pubkey = S256Point.parse_xonly(b[1:33])
         m = (b_len - 33) // 32
         hashes = [b[33 + 32 * i : 65 + 32 * i] for i in range(m)]
-        return cls(tapleaf_version, parity, internal_pubkey, hashes)
+        return cls(version, parity, internal_pubkey, hashes)
 
 
 class TapScript(ScriptPubKey):

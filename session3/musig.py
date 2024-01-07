@@ -152,33 +152,17 @@ class KeyAggregator:
         raise NotImplementedError
 
     def keyagg_coef(self, point):
-        """the coefficient for each pubkey, based on the group commitment and
+        """the coefficient for each pubkey, c_i = H(L || P_i) except c_2 = 1"""
         # if the point is not in the list of points, raise a ValueError
         # the second point has a coefficient of 1, everything else uses H(L||P)
         # if the point is the same as the second_point, return 1
-        # coefficient is H(L || P) converted from big endian to an integer
+        # coefficient is H(L||P) converted from big endian to an integer
         # where H is hash_keyaggcoef, L is the group commitment, and P is
         # the compressed sec serialization of the point
         raise NotImplementedError
 
 
 class KeyAggTest(TestCase):
-    def test_compute_group_commitment(self):
-        raw_pubkeys = [
-            "034a5169f673aa632f538aaa128b6348536db2b637fd89073d49b6a23879cdb3ad",
-            "0225fa6a4190ddc87d9f9dd986726cafb901e15c21aafd2ed729efed1200c73de8",
-            "03ed214e8ce499d92a2085e7e6041b4f081c7d29d8770057fc705a131d2918fcdb",
-            "02609ae8d31e3b290e74483776c1c8dfc2756b87d9635d654eb9e1ca95c228b169",
-            "02ffe558e388852f0120e46af2d1b370f85854a8eb0841811ece0e3e03d282d57c",
-            "02d42d696f2c343dc67d80fcd85dbbdb2edef3cac71126625d0cbcacc231a00015",
-        ]
-        points = [S256Point.parse(bytes.fromhex(r)) for r in raw_pubkeys]
-        keyagg = KeyAggregator(points)
-        self.assertEqual(
-            keyagg.group_commitment.hex(),
-            "9a02b1f7c524456922ec47b4db33810e244866f68a5d4478fc5b83c43231dad0",
-        )
-
     def test_compute_group_point(self):
         raw_pubkeys = [
             "034a5169f673aa632f538aaa128b6348536db2b637fd89073d49b6a23879cdb3ad",
@@ -191,8 +175,12 @@ class KeyAggTest(TestCase):
         points = [S256Point.parse(bytes.fromhex(r)) for r in raw_pubkeys]
         keyagg = KeyAggregator(points)
         self.assertEqual(
+            keyagg.group_commitment.hex(),
+            "19eb904fe5e658ba652c6e65a1a2a7b90b4f76190751508323f3eac2fb1313b1",
+        )
+        self.assertEqual(
             keyagg.group_point.sec().hex(),
-            "03628b3911ec6818290dbc40e0039652ceac6bef4355c6b461af870d0aafa123a0",
+            "0260c1cb3a2a8c55083e0c8fd5548634075eb7b04af0a35e6e57d05abff2815e56",
         )
 
 
@@ -207,35 +195,34 @@ class SigningContext:
         self.msg = msg
         # make the group point available for convenience
         self.group_point = self.keyagg.group_point
+        # make the nonce coeffficien available for convenience
+        self.nonce_coef = self.compute_nonce_coef()
         # make the nonce point available for convenience
-        self.nonce_point = self.group_nonce_point()
+        self.nonce_point = self.compute_nonce_point()
+        # make the challenge available for convenience
+        self.challenge = self.compute_challenge()
 
     def keyagg_coef(self, point):
         """Convenience method"""
         return self.keyagg.keyagg_coef(point)
 
-    def nonce_coef(self):
+    def compute_nonce_coef(self):
         """the coefficient in front of the second nonce determined by the msg"""
         preimage = self.nonceagg.serialize() + self.group_point.xonly() + self.msg
         return big_endian_to_int(hash_musignoncecoef(preimage))
 
-    def group_nonce_point(self):
+    def compute_nonce_point(self):
         """R = S + bT where b is the nonce coefficient, dependent on msg"""
-        return self.nonceagg.nonce_point(self.nonce_coef())
+        return self.nonceagg.nonce_point(self.nonce_coef)
 
-    def challenge(self):
-        """The message being signed by each participant so it aggregates to
-        a single signature. This is what will get verified in the end
-        d = H(R || P || z)"""
-        preimage = (
-            self.group_nonce_point().xonly() + self.group_point.xonly() + self.msg
-        )
-        return big_endian_to_int(hash_challenge(preimage))
+    def compute_challenge(self):
+        """The message being signed d = H(R || P || z)"""
+        pi = (self.nonce_point.xonly() + self.group_point.xonly() + self.msg)
+        return big_endian_to_int(hash_challenge(pi))
 
     def verify(self, partial_sig, nonce_public_share, point):
-        """Verify that the partial signature is valid for a particular nonce
-        # get the nonce point for this particular pubkey
-        # we negate if it's odd
+        # get the nonce point using nonce_public_share and the nonce_coef
+        # if it's even it's r, otherwise it's negated
         # negate the participant point if our group point is odd
         # c is our keyagg coefficient for this particular participant point
         # d is our challenge H(R||P||z)
@@ -318,7 +305,7 @@ class PartialSigTest(TestCase):
         coor.register_nonce_share(participant_1.point.sec(), nonce_share_1.public_share)
         coor.register_nonce_share(participant_2.point.sec(), nonce_share_2.public_share)
         context = coor.create_signing_context(msg)
-        partial_sig = participant_1.sign(context)
+        partial_sig = bytes.fromhex("1aad95d9490e4b8599377ff6a546a1d075fb4242c749dbcbc010589e23c21776")
         self.assertTrue(
             context.verify(partial_sig, nonce_share_1.public_share, participant_1.point)
         )
@@ -356,8 +343,7 @@ class PartialSigTest(TestCase):
 
 
 class MuSigCoordinator:
-    """Coordinator that collects nonces and partial signatures and generates the
-    final SchnorrSignature"""
+    """Coordinator that collects nonces and final SchnorrSignature generation"""
     def __init__(self, participant_points, merkle_root=None, sort=True):
         if len(participant_points) == 0:
             raise ValueError("Need at least one public key")
@@ -368,7 +354,7 @@ class MuSigCoordinator:
         else:
             self.secs = [p.sec() for p in participant_points]
             self.points = participant_points
-        self.keyagg = KeyAggregator(self.points, merkle_root=merkle_root)
+        self.keyagg = KeyAggregator(self.points, merkle_root=merkle_root, sort=sort)
         # convenience
         self.group_point = self.keyagg.group_point
         self.nonce_shares = {}
@@ -382,7 +368,7 @@ class MuSigCoordinator:
     def compute_nonce_point(self, msg):
         # compute nonce share sums, S and T from the nonce shares
         # S = S_1 + S_2 + ... + S_n, T = T_1 + T_2 + ... + T_n
-        # the preimage is S || T || P || z, S and T are in sec and P in xonly
+        # the preimage is S || T || P || z, S and T are in sec and P in xonly and z is the message
         # nonce_coef (b) is hash_musignoncecoef of the preimage as a big endian int
         # the nonce point is R=S+bT
         raise NotImplementedError
@@ -526,13 +512,13 @@ class MuSigTest(TestCase):
         for test in test_data["valid_test_cases"]:
             raw_pubkeys = [test_data["pubkeys"][i] for i in test["key_indices"]]
             pubkeys = [S256Point.parse(bytes.fromhex(raw)) for raw in raw_pubkeys]
-            keyagg = KeyAggregator(pubkeys)
+            keyagg = KeyAggregator(pubkeys, sort=False)
             self.assertEqual(keyagg.group_point.xonly().hex().upper(), test["expected"])
         for test in test_data["error_test_cases"]:
             with self.assertRaises(ValueError):
                 raw_pubkeys = [test_data["pubkeys"][i] for i in test["key_indices"]]
                 pubkeys = [S256Point.parse(bytes.fromhex(raw)) for raw in raw_pubkeys]
-                keyagg = KeyAggregator(pubkeys)
+                keyagg = KeyAggregator(pubkeys, sort=False)
 
     def test_nonce_generation(self):
         tests = [

@@ -9,8 +9,9 @@ def sha256(x):
 
 def tagged_hash(tag, msg):
     # compute the sha256 of the tag using sha256
+    tag_hash = sha256(tag)
     # compute the tagged hash by getting the sha256 of the tag hash + tag hash + message
-    raise NotImplementedError
+    return sha256(tag_hash + tag_hash + msg)
 
 
 def hash_aux(msg):

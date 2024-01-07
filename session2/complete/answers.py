@@ -36,9 +36,6 @@ True
 010000000001019569365ed633a71a12ad889235f2f0e7509ffa53e510c25f46241063d76418870000000000ffffffff012c4c0000000000002251205f401f8ef325e3601e93f357ba33014416b7e5877a6ae69e68c8438bd522e1f601403697a0f0f49a451668b9b0361ec7c3b857299f0f80b8ce8c50e1d3cc87f44382de2b6eeccabe0efda3b1639841c342fce64ba28a2a018d4a9a69f5e7a0d43f6b00000000
 
 #endcode
-#unittest
-ecc:TapRootTest:test_tweaked_key:
-#endunittest
 #exercise
 
 ## Checkpoint Exercise
@@ -186,13 +183,12 @@ Make a TapScript for 4-of-4 using pubkeys from private keys which correspond to 
 >>> # Example of making a TapLeaf and calculating the hash
 >>> from ecc import PrivateKey
 >>> from hash import hash_tapleaf
->>> from helper import int_to_byte
 >>> from taproot import TapScript, TapLeaf
 >>> pubkey_a = PrivateKey(11111111).point.xonly()
 >>> pubkey_b = PrivateKey(22222222).point.xonly()
 >>> tap_script = TapScript([pubkey_a, 0xAD, pubkey_b, 0xAC])
 >>> tap_leaf = TapLeaf(tap_script)
->>> h = hash_tapleaf(int_to_byte(tap_leaf.tapleaf_version) + tap_leaf.tap_script.serialize())
+>>> h = hash_tapleaf(bytes([tap_leaf.version]) + tap_leaf.tap_script.serialize())
 >>> print(h.hex())
 d1b3ee8e8c175e5db7e2ff7a87435e8f751d148b77fb1f00e14ff8ffa1c09a40
 
@@ -215,7 +211,7 @@ Calculate the TapLeaf hash whose TapScript is a 2-of-4 using pubkeys from privat
 >>> # create the TapLeaf with the TapScript
 >>> tap_leaf = TapLeaf(tap_script)  #/
 >>> # calculate the hash by using hash_tapleaf on the tapleaf version and the tap script
->>> h = hash_tapleaf(int_to_byte(tap_leaf.tapleaf_version) + tap_leaf.tap_script.serialize())  #/
+>>> h = hash_tapleaf(int_to_byte(tap_leaf.version) + tap_leaf.tap_script.serialize())  #/
 >>> # print the hash hex
 >>> print(h.hex())  #/
 0787f5aba506f118a90cefaf00ccfdb2785cf5998d40c3d43ebfaa5b4c6bcb7d
@@ -270,7 +266,7 @@ Calculate the TabBranch hash whose left and right nodes are TapLeafs whose TapSc
 >>> pubkey_2 = PrivateKey(20202).point.xonly()
 >>> pubkey_3 = PrivateKey(30303).point.xonly()
 >>> pubkey_4 = PrivateKey(40404).point.xonly()
->>> # create two 1-of-2 TapScripts
+>>> # create two 1-of-2 TapScripts [pk_a, 0xac, pk_b, 0xba, 0x51, 0x87]
 >>> tap_script_1 = TapScript([pubkey_1, 0xAC, pubkey_2, 0xBA, 0x51, 0x87])  #/
 >>> tap_script_2 = TapScript([pubkey_3, 0xAC, pubkey_4, 0xBA, 0x51, 0x87])  #/
 >>> # create two TapLeafs with the TapScripts
@@ -318,30 +314,29 @@ taproot:TapRootTest:test_tapbranch_hash:
 >>> tap_leaf_2 = TapLeaf(tap_script_2)
 >>> tap_leaf_3 = TapLeaf(tap_script_3)
 >>> tap_branch_1 = TapBranch(tap_leaf_1, tap_leaf_2)
->>> tap_root = TapBranch(tap_branch_1, tap_leaf_3)
->>> merkle_root = tap_root.hash()
+>>> tap_branch_2 = TapBranch(tap_branch_1, tap_leaf_3)
+>>> merkle_root = tap_branch_2.hash()
 >>> print(merkle_root.hex())
 f53fab2e9cf0a458609226b4c42d5c0264700cdf33850c2b1423543a44ad4234
 
 #endcode
 #exercise
 
-Calculate the External PubKey for a Taproot output whose internal pubkey is 90909 and whose Merkle Root is from two TapBranches, each of which is a single signature TapLeaf. The private keys corresponding to the left TapBranch's TapLeafs are 10101 and 20202. The private keys corresponding to the right TapBranch's TapLeafs are 30303 and 40404.
+Calculate the External PubKey for a Taproot output whose internal pubkey has a private key of 90909 and whose Merkle Root is from two TapBranches, each of which is a single signature TapLeaf. The private keys corresponding to the left TapBranch's TapLeafs are 10101 and 20202. The private keys corresponding to the right TapBranch's TapLeafs are 30303 and 40404.
 
 ----
 >>> from ecc import PrivateKey
 >>> from helper import big_endian_to_int
 >>> from taproot import TapScript, TapLeaf, TapBranch
->>> internal_pubkey = PrivateKey(90909).point
+>>> p = PrivateKey(90909).point
 >>> pubkey_1 = PrivateKey(10101).point.xonly()
 >>> pubkey_2 = PrivateKey(20202).point.xonly()
 >>> pubkey_3 = PrivateKey(30303).point.xonly()
 >>> pubkey_4 = PrivateKey(40404).point.xonly()
->>> # create four tap scripts [pubkey, 0xac] one for each pubkey
->>> tap_script_1 = TapScript([pubkey_1, 0xAC])  #/
->>> tap_script_2 = TapScript([pubkey_2, 0xAC])  #/
->>> tap_script_3 = TapScript([pubkey_3, 0xAC])  #/
->>> tap_script_4 = TapScript([pubkey_4, 0xAC])  #/
+>>> tap_script_1 = TapScript([pubkey_1, 0xAC])
+>>> tap_script_2 = TapScript([pubkey_2, 0xAC])
+>>> tap_script_3 = TapScript([pubkey_3, 0xAC])
+>>> tap_script_4 = TapScript([pubkey_4, 0xAC])
 >>> # create four TapLeafs with the TapScripts
 >>> tap_leaf_1 = TapLeaf(tap_script_1)  #/
 >>> tap_leaf_2 = TapLeaf(tap_script_2)  #/
@@ -351,11 +346,11 @@ Calculate the External PubKey for a Taproot output whose internal pubkey is 9090
 >>> tap_branch_1 = TapBranch(tap_leaf_1, tap_leaf_2)  #/
 >>> tap_branch_2 = TapBranch(tap_leaf_3, tap_leaf_4)  #/
 >>> # create another TapBranch that corresponds to the merkle root and get its hash
->>> merkle_root = TapBranch(tap_branch_1, tap_branch_2).hash()  #/
->>> # the external public key is the internal public key tweaked with the Merkle Root
->>> external_pubkey = internal_pubkey.tweaked_key(merkle_root)  #/
+>>> m = TapBranch(tap_branch_1, tap_branch_2).hash()  #/
+>>> # the external public key (Q) is the internal public key (P) tweaked with the Merkle Root (m)
+>>> q = p.tweaked_key(m)  #/
 >>> # print the hex of the xonly of the external pubkey
->>> print(external_pubkey.xonly().hex())  #/
+>>> print(q.xonly().hex())  #/
 8b9f09cd4a33e62b0c9d086056bbdeb7a218c1e4830291b9be56841b31d94ccb
 
 #endexercise
@@ -449,12 +444,14 @@ Create a Signet P2TR address with these Script Spend conditions:
 5. Leaf 2 uses this xonly pubkey: <code>331a8f6a14e1b41a6b523ddb505fbc0662a6446bd42408692497297d3474aeec</code>
 6. Leaf 3 uses this xonly pubkey: <code>158a49d62c384c539a453e41a70214cfb85184954ae5c8df4b47eb74d58ff16f</code>
 
+Submit your address at [this link](https://docs.google.com/spreadsheets/d/1BHqFAzgfThrf64q9pCinwTd7FitJrL5Is3HHBR3UyeI/edit?usp=sharing)
+
 ----
 >>> from ecc import PrivateKey, S256Point
 >>> from hash import sha256
 >>> from helper import big_endian_to_int
 >>> from taproot import TapScript, TapLeaf, TapBranch
->>> my_email = b"jimmy@programmingblockchain.com"  #/my_secret = b"<fill this in with your email>"
+>>> my_email = b"jimmy@programmingblockchain.com"  #/my_email = b"<fill this in with your email>"
 >>> my_secret = big_endian_to_int(sha256(my_email))
 >>> internal_pubkey = S256Point.parse(bytes.fromhex("cd04c1bf88ca891af152fc57c36523ab59efb16b7ec07caca0cfc4a1f2051d9e"))
 >>> pubkey_2 = bytes.fromhex("331a8f6a14e1b41a6b523ddb505fbc0662a6446bd42408692497297d3474aeec")
@@ -475,7 +472,6 @@ Create a Signet P2TR address with these Script Spend conditions:
 >>> tap_branch_2 = TapBranch(tap_branch_1, tap_leaf_3)  #/
 >>> # get the hash of this branch, this is the Merkle Root
 >>> merkle_root = tap_branch_2.hash()  #/
->>> print(merkle_root.hex())
 >>> # print the address using the p2tr_address method of internal_pubkey and specify signet
 >>> print(internal_pubkey.p2tr_address(merkle_root, network="signet"))  #/
 tb1pxh7kypwsvxnat0z6588pufhx43r2fnqjyn846qj5kx8mgqcamvjsyn5cjg

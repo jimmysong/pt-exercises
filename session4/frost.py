@@ -23,7 +23,7 @@ def hash_frostnoncecoef(msg):
 def lagrange(participants, x_i, x):
     # start the value at 1
     # loop through the participants
-        # if the participant is not x_1
+        # if the participant is not x_i
             # multiply value by (x-x_j)/(x_i-x_j) using field division
     # return the value mod N
     raise NotImplementedError
@@ -36,7 +36,7 @@ def lagrange_coef(participants, x_i):
 
 def recover_secret(values):
     # return the sum of the values mod by N
-    return sum(values) % N
+    raise NotImplementedError
 
 
 class LaGrangeTest(TestCase):
@@ -158,24 +158,29 @@ class SigningContext:
         self.nonce_coef = big_endian_to_int(hash_frostnoncecoef(preimage)) % N
         # make the nonce point available
         self.nonce_point = nonceagg.nonce_point(self.nonce_coef)
+        self.challenge = self.compute_challenge()
 
     def address(self, network="mainnet"):
         return self.group_polynomial.y_value(0).p2tr_address(self.merkle_root, network)
 
-    def challenge(self):
-        """The message being signed by each participant so it aggregates to
-        a single signature. This is what will get verified in the end
-        d = H(R || P || z)"""
+    def compute_challenge(self):
+        """The message being signed by each participant d = H(R||P||z)"""
         preimage = self.nonce_point.xonly() + self.group_point.xonly() + self.msg
         return big_endian_to_int(hash_challenge(preimage))
 
     def verify(self, partial_sig, nonce_public_share, x_i):
-        """Verify that the partial signature is valid for a particular nonce
-        # get the nonce point for this particular pubkey
-        # we negate if it's odd
-        # negate the participant point if our group point is odd
+        """Verify that the partial signature is valid"""
+        # if the nonce point is even
+            # r_i is the nonce point from nonce_public share
+        # otherwise
+            # r_i is the negated nonce point from nonce_public share
+        # if the group point is even
+            # p_i is the group polynomial at x_i
+        # otherwise
+            # p_i is the negated group polynomial at x_i
         # c_i is our lagrange coefficient for this x_i
         # d is our challenge H(R||P||z)
+        # s_i is the partial sig interpreted as big endian int
         # return whether s_i * G = R_i + c_i * d * P_i
         raise NotImplementedError
 
@@ -210,12 +215,17 @@ class FrostSigner:
 
     def sign(self, context):
         """Sign the message in the context using the nonces in the context"""
-        # if the group nonce point is odd, we need to negate the k_i
-        # use the nonce method with the context's nonce_coef
+        # if the nonce point is even
+            # k_i is the nonce using the nonce_coef from context
+        # otherwise
+            # k_i is N minus the nonce using the nonce_coef from context
         # get this point's lagrange coefficient
         # get the challenge (d = H (R || P || z)
-        # if the group point is odd, we need to negate the secret (e_i)
-        # s_i = k + c_i * d * e_i, where d is the challenge
+        # if the group point is even
+            # y_i is the secret
+        # otherwise
+            # y_i is N minus the secret
+        # s_i = k + c_i * d * y_i, where d is the challenge
         # the partial signature is s as big endian, 32 bytes
         # check that partial sig verifies using the verify method of context
         # return the partial signature
@@ -287,6 +297,7 @@ class FrostCoordinator:
         # check if every participant has registered a partial signature
         # sum up the partial signatures to a complete s
         # account for the tweak by checking tweak_amount
+            # t is the tweak amount
             # challenge d = H(R||Q||m)  is in the signing context
             # s = s + d * t if group point is even, s = s - d * t if odd
         # get the group nonce point (R) from the signing context
