@@ -13,8 +13,8 @@ The two concepts that you'll learn here are tagged hashes and x-only pubkeys. Th
 #endmarkdown
 #markdown
 # Tagged Hashes - Motivation
-* We want to use different hash functions so we don't get unnecessary Hash reuse
-* We don't want to create a brand new hash functions, so we re-use sha256
+* We want to use different hash functions so we don't get unnecessary hash collisions
+* We don't want to create a brand new hash functions, so we use sha256
 * We use a different tagged hash function for each context and we define each tagged hash function.
 
 #endmarkdown
@@ -62,7 +62,7 @@ hash:HashTest:test_tagged_hash:
 #markdown
 # Tagged Hashes - Observations
 * Each hash is different so that hashes cannot feasibly be re-used in different contexts
-* There are 10 different contexts, each essentially having its own hash function
+* There are many different contexts, each essentially having its own hash function
 * The idea is that each tagged hash is different, though underneath, they all depend on the security of SHA256
 #endmarkdown
 #markdown

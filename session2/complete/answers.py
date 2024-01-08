@@ -210,8 +210,8 @@ Calculate the TapLeaf hash whose TapScript is a 2-of-4 using pubkeys from privat
 >>> tap_script = TapScript([pubkey_1, 0xAC, pubkey_2, 0xBA, pubkey_3, 0xBA, pubkey_4, 0xBA, 0x52, 0x87])  #/
 >>> # create the TapLeaf with the TapScript
 >>> tap_leaf = TapLeaf(tap_script)  #/
->>> # calculate the hash by using hash_tapleaf on the tapleaf version and the tap script
->>> h = hash_tapleaf(int_to_byte(tap_leaf.version) + tap_leaf.tap_script.serialize())  #/
+>>> # calculate the hash by using hash_tapleaf on the version and the tap script
+>>> h = hash_tapleaf(int_to_byte(tap_leaf.version) + tap_script.serialize())  #/
 >>> # print the hash hex
 >>> print(h.hex())  #/
 0787f5aba506f118a90cefaf00ccfdb2785cf5998d40c3d43ebfaa5b4c6bcb7d

@@ -40,7 +40,7 @@
       <li><strong>FROST</strong>
     </ul>
   </section>
-  <section>v
+  <section>
     <h2>Session Objectives</h2>
     <ul>
       <li class="fragment"><strong>Create a p2tr Key Path Spending Transaction</strong>
@@ -319,9 +319,6 @@ print(tx_obj.serialize().hex())
     <table class="medhex">
       <tr class="fragment">
         <td>
-          Valid
-        </td>
-        <td>
           <span class="op brown">OP_CHECKSIGADD</span>
         </td>
         <td>
@@ -333,7 +330,7 @@ print(tx_obj.serialize().hex())
               <span class="elem red">n</span>
             </div>
             <div class="row">
-              <span class="elem brown">Signature</span>
+              <span class="elem brown">Good Signature</span>
             </div>
           </div>
         </td>
@@ -350,9 +347,6 @@ print(tx_obj.serialize().hex())
       </tr>
       <tr class="fragment">
         <td>
-          Invalid
-        </td>
-        <td>
           <span class="op brown">OP_CHECKSIGADD</span>
         </td>
         <td>
@@ -364,7 +358,7 @@ print(tx_obj.serialize().hex())
               <span class="elem red">n</span>
             </div>
             <div class="row">
-              <span class="elem brown">Signature</span>
+              <span class="elem brown">Bad Signature</span>
             </div>
           </div>
         </td>
@@ -766,15 +760,15 @@ tap_leaf_1 = TapLeaf(tap_script_1)
 tap_leaf_2 = TapLeaf(tap_script_2)
 tap_leaf_3 = TapLeaf(tap_script_3)
 tap_branch_1 = TapBranch(tap_leaf_1, tap_leaf_2)
-tap_root = TapBranch(tap_branch_1, tap_leaf_3)
-merkle_root = tap_root.hash()
+tap_branch_2 = TapBranch(tap_branch_1, tap_leaf_3)
+merkle_root = tap_branch_2.hash()
 print(merkle_root.hex())
     </code></pre>
   </section>
   <section>
     <h2>Exercises</h2>
     <ol start="7">
-      <li>Calculate the External PubKey for a Taproot output whose internal pubkey is 90909 and whose Merkle Root is from two TapBranches, each of which is a single signature TapLeaf. The private keys corresponding to the left TapBranch's TapLeafs are 10101 and 20202. The private keys corresponding to the right TapBranch's TapLeafs are 30303 and 40404.
+      <li>Calculate the External PubKey for a Taproot output whose internal pubkey's private key is 90909 and whose Merkle Root is from two TapBranches, each of which is a single signature TapLeaf. The private keys corresponding to the left TapBranch's TapLeafs are 10101 and 20202. The private keys corresponding to the right TapBranch's TapLeafs are 30303 and 40404.
     </ol>
   </section>
 </section>

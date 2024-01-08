@@ -262,9 +262,11 @@ class Script:
                         tap_script = witness.tap_script()
                         external_pubkey = control_block.external_pubkey(tap_script)
                         # the tweak point should be what's on the stack
-                        if external_pubkey.parity != control_block.parity:
+                        if (external_pubkey.even and control_block.parity) or (
+                            not external_pubkey.even and not control_block.parity
+                        ):
                             print(
-                                f"bad external pubkey parity {external_pubkey.parity} vs {control_block.parity}"
+                                f"bad external pubkey parity {external_pubkey.even} vs {control_block.parity}"
                             )
                             return False
                         if external_pubkey.xonly() != stack.pop():

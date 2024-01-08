@@ -221,42 +221,44 @@ class SigningContext:
         return big_endian_to_int(hash_challenge(pi))
 
     def verify(self, partial_sig, nonce_public_share, point):
-        # get the nonce point using nonce_public_share and the nonce_coef
-        # if it's even it's r, otherwise it's negated
+        # if nonce point is even, we use R_i, otherwise -R_i
+            # get R_i using nonce_public_share and the nonce_coef
+            # get -R_i using nonce_public_share and the nonce_coef
         # negate the participant point if our group point is odd
         # c is our keyagg coefficient for this particular participant point
         # d is our challenge H(R||P||z)
+        # s_i is the partial sig in big endian
         # return whether s_i * G = R + c_i * d * P_i
         raise NotImplementedError
 
 
 class MuSigParticipant:
     """Represents a MuSig2 signer"""
-    def __init__(self, private_key, private_share=None):
+    def __init__(self, private_key, nonce_private_share=None):
         # The private key (e_i)
         self.private_key = private_key
         # The public key/point (P_i = e_i * G)
         self.point = private_key.point
         # The nonce private share l,m which can be used to generate the nonce k
-        self.private_share = private_share
+        self.nonce_private_share = nonce_private_share
         # Make sure the nonce private share belongs to this participant
-        if private_share and self.point != self.private_share.pubkey:
+        if nonce_private_share and self.point != self.nonce_private_share.pubkey:
             raise ValueError("Nonce does not correspond to the participant")
 
     def generate_nonce_share(
         self, aggregate_pubkey=None, msg=None, extra=None, rand=None
     ):
         # If we don't have a nonce yet, generate it using the secure generation algo
-        self.private_share = NoncePrivateShare.generate_nonce_share(
+        self.nonce_private_share = NoncePrivateShare.generate_nonce_share(
             self.point, self.private_key, aggregate_pubkey, msg, extra, rand
         )
-        return self.private_share.public_share
+        return self.nonce_private_share.public_share
 
     def nonce(self, coef):
         """k_i = l_i + b * m_i"""
-        if self.private_share is None:
+        if self.nonce_private_share is None:
             raise RuntimeError("Nonce shares have not been defined yet")
-        return self.private_share.nonce(coef)
+        return self.nonce_private_share.nonce(coef)
 
     def sign(self, context):
         """Sign the message in the context using the nonces in the context"""
@@ -265,7 +267,7 @@ class MuSigParticipant:
         # get this point's keyagg coefficient (c_i = H(L || P_i))
         # get the challenge (d = H (R || P || z)
         # if the group point is odd, we need to negate the secret (e_i)
-        # s_i = k + c_i * d * e_i, where d is the challenge
+        # s_i = k + c_i * d * e_i, where d is the challenge, mod by N
         # the partial signature is s as big endian, 32 bytes
         # check that partial sig verifies using the verify method of context
         # return the partial signature
@@ -279,8 +281,8 @@ class PartialSigTest(TestCase):
         msg = b"Hello World!"
         nonce_share_1 = NoncePrivateShare(3000, 4000, participant_1.point)
         nonce_share_2 = NoncePrivateShare(5000, 6000, participant_2.point)
-        participant_1.private_share = nonce_share_1
-        participant_2.private_share = nonce_share_2
+        participant_1.nonce_private_share = nonce_share_1
+        participant_2.nonce_private_share = nonce_share_2
         pubkeys = [participant_1.point, participant_2.point]
         coor = MuSigCoordinator(pubkeys)
         coor.register_nonce_share(participant_1.point.sec(), nonce_share_1.public_share)
@@ -298,8 +300,8 @@ class PartialSigTest(TestCase):
         msg = b"Hello World!"
         nonce_share_1 = NoncePrivateShare(3000, 4000, participant_1.point)
         nonce_share_2 = NoncePrivateShare(5000, 6000, participant_2.point)
-        participant_1.private_share = nonce_share_1
-        participant_2.private_share = nonce_share_2
+        participant_1.nonce_private_share = nonce_share_1
+        participant_2.nonce_private_share = nonce_share_2
         pubkeys = [participant_1.point, participant_2.point]
         coor = MuSigCoordinator(pubkeys)
         coor.register_nonce_share(participant_1.point.sec(), nonce_share_1.public_share)
@@ -316,8 +318,8 @@ class PartialSigTest(TestCase):
         msg = b"Hello World!"
         nonce_share_1 = NoncePrivateShare(3000, 4000, participant_1.point)
         nonce_share_2 = NoncePrivateShare(5000, 6000, participant_2.point)
-        participant_1.private_share = nonce_share_1
-        participant_2.private_share = nonce_share_2
+        participant_1.nonce_private_share = nonce_share_1
+        participant_2.nonce_private_share = nonce_share_2
         pubkeys = [participant_1.point, participant_2.point]
         for merkle_root in (
             None,
@@ -412,11 +414,11 @@ class MuSigCoordinator:
     def compute_sig(self):
         """Aggregates the partial signatures"""
         # sum up the partial signatures to a complete s
-        # get the group nonce point (R) from the signing context
+        # get the nonce point (R) from the signing context
         # if we've tweaked (see self.keyagg.tweak_amount), we need to shift s
-            # tweak (t) is held in the Key Aggregator
+            # tweak (t) is the self.keyagg.tweak_amount
             # challenge d = H(R||Q||m)  is in the signing context
-            # s = s + d * t if group point is even, s = s - d * t if odd
+            # s = (s + d * t) % N if group point is even, s = (s - d * t) % N if odd
         # create the signature
         # sanity check that the generated signature validates
         # return the signature

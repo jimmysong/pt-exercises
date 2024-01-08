@@ -780,6 +780,38 @@ def op_checksigverify_schnorr(stack, tx_obj, input_index):
     return op_checksig_schnorr(stack, tx_obj, input_index) and op_verify(stack)
 
 
+def op_checksigadd_schnorr(stack, tx_obj, input_index):
+    # check to see if there's at least 3 elements
+    if len(stack) < 3:
+        return False
+    # pop off the pubkey
+    pubkey = stack.pop()
+    # pop off the n and do decode_num on it
+    n = decode_num(stack.pop())
+    # pop off the signature
+    sig = stack.pop()
+    # parse the pubkey
+    point = S256Point.parse_xonly(pubkey)
+    # if the signature has 0 length, it's not valid
+    # so put encode_num(n) back on stack and return True
+    if len(sig) == 0:
+        stack.append(encode_num(n))
+        return True
+    # use the get_signature_and_hashtype function on the sig
+    schnorr, hash_type = get_signature_and_hashtype(sig)
+    # get the message from the tx_obj.sig_hash using input index and hash type
+    msg = tx_obj.sig_hash(input_index, hash_type)
+    # verify the Schnorr signature
+    if point.verify_schnorr(msg, schnorr):
+        # if valid, increment the n, encode_num it and push back on stack
+        stack.append(encode_num(n + 1))
+    else:
+        # if invalid, encode_num on n and push back on stack
+        stack.append(encode_num(n))
+    # return True for successful execution
+    return True
+
+
 def op_checkmultisig(stack, tx_obj, input_index):
     if len(stack) < 1:
         return False
@@ -1062,6 +1094,7 @@ TAPROOT_OP_CODE_FUNCTIONS = {
     183: op_nop,
     184: op_nop,
     185: op_nop,
+    186: op_checksigadd_schnorr,
     187: op_success,
     188: op_success,
     189: op_success,
@@ -1223,4 +1256,6 @@ OP_CODE_NAMES = {
     183: "OP_NOP8",
     184: "OP_NOP9",
     185: "OP_NOP10",
+    186: "OP_CHECKSIGADD",
 }
+

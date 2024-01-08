@@ -32,7 +32,15 @@ def hash_keyagglist(msg):
     return tagged_hash(b"KeyAgg list", msg)
 
 
+def hash_musigaux(msg):
+    return tagged_hash(b"MuSig/aux", msg)
+
+
 def hash_musignonce(msg):
+    return tagged_hash(b"MuSig/nonce", msg)
+
+
+def hash_musignoncecoef(msg):
     return tagged_hash(b"MuSig/noncecoef", msg)
 
 

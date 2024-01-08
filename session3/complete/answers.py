@@ -10,7 +10,6 @@
 >>> from script import address_to_script_pubkey
 >>> from taproot import TapScript, TapLeaf, TapBranch
 >>> from tx import Tx, TxIn, TxOut
->>> from witness import Witness
 >>> my_secret = 21000000
 >>> my_private_key = PrivateKey(my_secret)
 >>> p = S256Point.parse(bytes.fromhex("cd04c1bf88ca891af152fc57c36523ab59efb16b7ec07caca0cfc4a1f2051d9e"))
@@ -35,10 +34,10 @@
 >>> tx_out = TxOut(target_amount, target_script)
 >>> tx_obj = Tx(1, [tx_in], [tx_out], network="signet", segwit=True)
 >>> cb = tap_branch_2.control_block(p, tap_leaf_1)
->>> tx_in.witness = Witness([tap_script_1.raw_serialize(), cb.serialize()])
+>>> tx_in.initialize_p2tr_scriptpath(tap_script_1, cb)
 >>> msg = tx_obj.sig_hash(0)
->>> sig = my_private_key.sign_schnorr(msg).serialize()
->>> tx_in.witness.items.insert(0, sig)
+>>> sig = my_private_key.sign_schnorr(msg)
+>>> tx_in.finalize_p2tr_scriptpath(sig.serialize())
 >>> tx_obj.verify()
 True
 >>> print(tx_obj.serialize().hex())
@@ -56,7 +55,6 @@ You have been sent 100,000 sats to the address you created in the last exercise 
 >>> from script import address_to_script_pubkey
 >>> from taproot import TapScript, TapLeaf, TapBranch
 >>> from tx import Tx, TxIn, TxOut
->>> from witness import Witness
 >>> my_email = b"jimmy@programmingblockchain.com"  #/my_email = b"<fill this in with your email>"
 >>> my_secret = big_endian_to_int(sha256(my_email))
 >>> my_private_key = PrivateKey(my_secret)
@@ -90,14 +88,14 @@ You have been sent 100,000 sats to the address you created in the last exercise 
 >>> tx_obj = Tx(1, [tx_in], [tx_out], network="signet", segwit=True)  #/
 >>> # create the control block from the TapBranch control_block method with internal_pubkey and tap_leaf_1
 >>> cb = tap_branch_2.control_block(p, tap_leaf_1)  #/
->>> # set the tx_in's witness to be the tap_script_1.raw_serialize() and control block, serialized
->>> tx_in.witness = Witness([tap_script_1.raw_serialize(), cb.serialize()])  #/
+>>> # tx_in.initialize_p2tr_scriptpath with tap_script 1 and control block
+>>> tx_in.initialize_p2tr_scriptpath(tap_script_1, cb)  #/
 >>> # set the message to be the transaction's sig_hash at index 0
 >>> msg = tx_obj.sig_hash(0)  #/
->>> # use sign_schnorr with yoru private key on the message and serialize it to get the signature
->>> sig = my_private_key.sign_schnorr(msg).serialize()  #/
->>> # insert the sig in front of the other elements in the witness using tx_in.witness.items.insert
->>> tx_in.witness.items.insert(0, sig)  #/
+>>> # use sign_schnorr with your private key on the message
+>>> sig = my_private_key.sign_schnorr(msg)  #/
+>>> # tx_in.finalize_p2tr_scriptpath with the serialized sig
+>>> tx_in.finalize_p2tr_scriptpath(sig.serialize())  #/
 >>> # verify the transaction
 >>> print(tx_obj.verify())  #/
 True
@@ -183,8 +181,8 @@ Create a new group public key with these component public keys:
 * The coefficients would work fine, but there's one optimization made in BIP327
 * Specifically, the second coefficient is always 1, all other coefficients stay the same
 * The reason that it's not the first is because of a corner case where all the public keys are the same
-* There's also the fact that there's the possibility of the group point being odd
-* The way this is solved is by every participant negating their secret
+* We also need to handle the possibility of the group point $P$ being odd
+* We solve this by every participant negating their secret
 #endmarkdown
 #code
 >>> # creating a BIP327 group public key
@@ -378,7 +376,7 @@ musig:NonceAggTest:test_compute_nonce_point:
 #endunittest
 #exercise
 
-Create a nonce point and nonce coefficient with your neighbor for this message: b"Love thy neighbor"
+Create a nonce point with your neighbor for this message: b"Love thy neighbor"
 
 ----
 >>> from ecc import N, PrivateKey
@@ -519,11 +517,11 @@ Participant 2's $l$ and $m$: 5000, 6000
 ...     e = participant_2.private_key.secret  #/
 ... else:  #/
 ...     e = N - participant_2.private_key.secret  #/
->>> # use the context's keylagg_coef method to get the keyagg coefficient (c_i = H(L||P_i))
+>>> # use the context's keyagg_coef method to get the keyagg coefficient (c_i = H(L||P_i))
 >>> c = context.keyagg_coef(participant_2.point)  #/
->>> # use the context's challenge method to get the group challenge (d = H(R||P||z))
+>>> # use the context's challenge property to get the group challenge (d = H(R||P||z))
 >>> d = context.challenge  #/
->>> # now get the partial signature s_i = k + c_i * d * e_i
+>>> # now get the partial signature s_i = k + c_i * d * e_i (mod N)
 >>> s = (k + c * d * e) % N  #/
 >>> # print the hex of the partial signature
 >>> print(hex(s))  #/
@@ -630,7 +628,7 @@ Trade partial signatures with your neighbor and verify for the message from Exer
 >>> # print the nonce share's serialization in hex and share with your neighbor
 >>> print(my_nonce_share.serialize().hex())  #/
 03d2b367270076e3cf7f7b3eb03231fea9ba0143b702fd14b196c36b7e7edc8213021e336acb6087523fe8b2f5c5d25fa8debfa4427af16e490c3020e9dff89970bf
->>> neighbor_share = NoncePublicShare.parse(bytes.fromhex("02047885833379c1f0fdc64ebf7a7741e530d111bd0a4dacabeb4ff657040bfa1503fcd6c272723feb9fecbd0efe06d02dd17c3f7ef5088764280109eadd88044417"))  #/ neighbor_share = NoncePublicShare.parse(bytes.fromhex("<fill in with your neighbor's hex public nonce share>"))
+>>> neighbor_share = NoncePublicShare.parse(bytes.fromhex("02047885833379c1f0fdc64ebf7a7741e530d111bd0a4dacabeb4ff657040bfa1503fcd6c272723feb9fecbd0efe06d02dd17c3f7ef5088764280109eadd88044417"))  #/neighbor_share = NoncePublicShare.parse(bytes.fromhex("<fill in with your neighbor's hex public nonce share>"))
 >>> # register my nonce share to the coordinator
 >>> coor.register_nonce_share(me.point.sec(), my_nonce_share)  #/
 >>> # register neighbor's share to the coordinator
@@ -743,7 +741,7 @@ Sum the partial signatures, create a Schnorr Signature and verify it using the g
 >>> s = (s_1 + s_2) % N  #/
 >>> # get the challenge from the context
 >>> d = context.challenge  #/
->>> # add d*t to s if group point is even, subtract d*t from s if odd
+>>> # add d*t to s if group point is even, subtract d*t from s if odd (mod by N)
 >>> if context.group_point.even:  #/
 ...     s = (s + d * t) % N  #/
 ... else:  #/
@@ -773,7 +771,7 @@ Trade partial signatures with your neighbor and verify for the message from Exer
 >>> my_secret = big_endian_to_int(sha256(b"jimmy@programmingblockchain.com"))  #/my_secret = big_endian_to_int(sha256(b"<my email address>"))
 >>> me = MuSigParticipant(PrivateKey(my_secret))
 >>> my_pubkey = me.point
->>> neighbor_pubkey = S256Point.parse(bytes.fromhex("02e79c4eb45764bd015542f6779cc70fef44b7a2432f839264768288efab886291"))  #/Neighbor_pubkey = S256Point.parse(bytes.fromhex("<my neighbor's sec pubkey>"))
+>>> neighbor_pubkey = S256Point.parse(bytes.fromhex("02e79c4eb45764bd015542f6779cc70fef44b7a2432f839264768288efab886291"))  #/neighbor_pubkey = S256Point.parse(bytes.fromhex("<my neighbor's sec pubkey>"))
 >>> merkle_root = bytes.fromhex("818c9d665b78324ba673afca23f5f4f5512214ccfd0554fe82c5f99f5a29689a")
 >>> # create the coordinator with my pubkey and my neighbor's pubkey with the merkle root
 >>> coor = MuSigCoordinator([my_pubkey, neighbor_pubkey], merkle_root)  #/
@@ -824,6 +822,7 @@ Submit your address at [this link](https://docs.google.com/spreadsheets/d/1BHqFA
 >>> from taproot import TapLeaf, TapScript
 >>> my_secret = big_endian_to_int(sha256(b"jimmy@programmingblockchain.com"))  #/my_secret = big_endian_to_int(sha256(b"<my email address>"))
 >>> me = MuSigParticipant(PrivateKey(my_secret))
+>>> my_pubkey = me.point
 >>> neighbor_pubkey = S256Point.parse(bytes.fromhex("02e79c4eb45764bd015542f6779cc70fef44b7a2432f839264768288efab886291"))  #/neighbor_pubkey = S256Point.parse(bytes.fromhex("<my neighbor's sec pubkey>"))
 >>> # collect the pubkeys in a list
 >>> pubkeys = [me.point, neighbor_pubkey]  #/

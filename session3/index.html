@@ -132,10 +132,10 @@ target_script = address_to_script_pubkey(target_address)
 tx_out = TxOut(target_amount, target_script)
 tx_obj = Tx(1, [tx_in], [tx_out], network="signet", segwit=True)
 cb = tap_branch_2.control_block(p, tap_leaf_1)
-tx_in.witness = Witness([tap_script_1.raw_serialize(), cb.serialize()])
+tx_in.initialize_p2tr_scriptspend(tap_script_1, cb)
 msg = tx_obj.sig_hash(0)
 sig = my_private_key.sign_schnorr(msg).serialize()
-tx_in.witness.items.insert(0, sig)
+tx_in.finalize_p2tr_scriptspend(sig)
 tx_obj.verify()
 print(tx_obj.serialize().hex())
     </code></pre>
@@ -156,7 +156,7 @@ print(tx_obj.serialize().hex())
     <ul>
       <li class="fragment">A way to make a single signature and a single pubkey from many pubkeys
       <li class="fragment">This is done through pubkey aggregation and signature aggregation
-      <li class="fragment">Essentially the same as n-of-n but with less on-chain footprint
+      <li class="fragment">Essentially the same as n-of-n multisig but with less on-chain footprint
       <li class="fragment">Can be done because of Schnorr Signatures' use of R and not just the x-coordinate used by ECDSA
       <li class="fragment">Defined in BIP327, which avoids a lot of the pitfalls of nonce generation
     </ul>
@@ -209,8 +209,8 @@ print(p.sec().hex())
       <li class="fragment">The coefficients would work fine, but there's one optimization made in BIP327
       <li class="fragment">Specifically, the second coefficient is always 1, all other coefficients stay the same
       <li class="fragment">The reason that it's not the first is because of a corner case where all the public keys are the same
-      <li class="fragment">There's also the fact that there's the possibility of the group point being odd
-      <li class="fragment">The way this is solved is by every participant negating their secret
+      <li class="fragment">We also need to handle the possibility of the group point $P$ being odd
+      <li class="fragment">We solve this by every participant negating their secret
     </ul>
   </section>
   <section>
@@ -280,6 +280,7 @@ print(p.sec().hex())
       <li class="fragment">$b = \mathcal{H}(S || T || P || z)$
       <li class="fragment">$k_i = l_i + b m_i, k_i  G = l_i G + b m_i G = S_i + b T_i = R_i$
       <li class="fragment">$R = \sum{R_i} = \sum{(S_i+b T_i)} = \sum{(l_i + b m_i)G} = \sum{k_i G}$
+      <li class="fragment">$=kG$ where $k=\sum{k_i}$
     </ul>
   </section>
   <section>
@@ -293,7 +294,7 @@ participants = [MuSigParticipant(PrivateKey(i * 1000)) for i in range(1, 7)]
 pubkeys = [p.point for p in participants]
 coor = MuSigCoordinator(pubkeys)
 for p in participants:
-    nonce_share = p.generate_nonce_share(rand=b'')
+    nonce_share = p.generate_nonce_share(msg=msg, rand=b'')
     coor.register_nonce_share(p.point.sec(), nonce_share)
 group_point = coor.keyagg.group_point
 s = S256Point.sum([n.s for n in coor.nonce_shares.values()])
@@ -301,8 +302,6 @@ t = S256Point.sum([n.t for n in coor.nonce_shares.values()])
 h = hash_musignoncecoef(s.sec()+t.sec()+group_point.xonly()+msg)
 b = big_endian_to_int(h)
 r = s + b*t
-print(r.sec().hex())
-038f12dde9f661cdd1d655a6fa8ac600de344550a1d70f1c0f5376e2600fa94a6b
 k = (participants[0].private_share.l + b * participants[0].private_share.m) % N
 print(hex(k))
     </code></pre>
@@ -347,7 +346,7 @@ print(hex(k))
       <li class="fragment">To verify a partial signature, we need from the coordinator: group commitment $L$, message $z$, aggregate nonce point $R$ and aggregate pubkey $P$
       <li class="fragment">We need from the participant nonce point $R_i$ and pubkey $P_i$
       <li class="fragment">We use these to calculate aggregate key coefficient $c_i=H(L || P_i)$ and group commitment $d=H(R || P || z)$
-      <li class="fragment">$s_i=k_i+c_i d e_i$ so what we check is $s_i G=k_iG+c_i d e_i G=R_i+c_i d P_i$ or $R=s_i G-c_i d P_i$
+      <li class="fragment">$s_i=k_i+c_i d e_i$ so what we check is $s_i G=k_iG+c_i d e_i G=R_i+c_i d P_i$ or $R_i=s_i G-c_i d P_i$
     </ul>
   </section>
   <section>
@@ -460,8 +459,8 @@ keyagg.group_point = keyagg.group_point + t * G
     <ul>
       <li class="fragment">If $Q$ is even, we sign for $Q=P+tG$
       <li class="fragment">$s = k + de$ which means $sG=kG+deG=R+dP$
-      <li class="fragment">$R=sG-dP=sG-dP+tdG-tdG=$
-      <li class="fragment">$(s+td)G-d(P+tG)=(s+td)G-dQ$
+      <li class="fragment">$(R,s)$ would validate for $P$, but not $Q$
+      <li class="fragment">$R=sG-dP=sG-dP+tdG-tdG=$ $(s+td)G-d(P+tG)=(s+td)G-dQ$
       <li class="fragment">The Schnorr Signature $(R, s+td)$ will validate for the tweaked key $Q$
     </ul>
   </section>
@@ -471,8 +470,7 @@ keyagg.group_point = keyagg.group_point + t * G
       <li class="fragment">If $Q$ is odd, we sign for $-Q=-P-tG$
       <li class="fragment">Since group point $Q$ is odd, participant used $-e_i$
       <li class="fragment">Thus, $s_i = k_i - de_i$ which means $sG=kG-deG=R-dP$
-      <li class="fragment">$R=sG+dP=sG+dP+tdG-tdG=$
-      <li class="fragment">$(s-td)G-d(-P-tG)=(s-td)G-d(-Q)$
+      <li class="fragment">$R=sG+dP=sG+dP+tdG-tdG=$ $(s-td)G-d(-P-tG)=(s-td)G-d(-Q)$
       <li class="fragment">The Schnorr Signature $(R, s-td)$ will validate for the tweaked key $-Q$
     </ul>
   </section>

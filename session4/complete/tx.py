@@ -893,6 +893,12 @@ class TxIn:
     def finalize_p2tr_keypath(self, sig):
         self.witness = Witness([sig])
 
+    def initialize_p2tr_scriptpath(self, tap_script, control_block):
+        self.witness = Witness([tap_script.raw_serialize(), control_block.serialize()])
+
+    def finalize_p2tr_scriptpath(self, *items):
+        self.witness.items = list(items) + self.witness.items
+
 
 class TxOut:
     def __init__(self, amount, script_pubkey):

@@ -13,7 +13,7 @@
 * $=(k+e d)G-dP =kG+d(eG)-dP=R+dP-dP=R$
 #endmarkdown
 #code
->>> from ecc import S256Point, SchnorrSignature, G, N
+>>> from ecc import S256Point, SchnorrSignature, G
 >>> from hash import hash_challenge
 >>> from helper import big_endian_to_int
 >>> msg = b"I'm learning Schnorr Signatures!"
@@ -55,7 +55,7 @@ True
 
 #endexercise
 #unittest
-ecc:SchnorrTest:test_verify:
+ecc:SchnorrTest:test_verify_schnorr:
 #endunittest
 #markdown
 # Schnorr Signing
@@ -126,7 +126,7 @@ Sign the message b"Schnorr Signatures adopt Taproot" with the private key 21,000
 
 #endexercise
 #unittest
-ecc:SchnorrTest:test_sign:
+ecc:SchnorrTest:test_sign_schnorr:
 #endunittest
 #markdown
 # Nonce ($k$) Creation
@@ -140,7 +140,7 @@ ecc:SchnorrTest:test_sign:
 #endmarkdown
 #code
 >>> # example of nonce creation
->>> from ecc import PrivateKey, N
+>>> from ecc import PrivateKey
 >>> from hash import sha256, hash_aux, hash_nonce
 >>> from helper import big_endian_to_int, int_to_big_endian, xor_bytes
 >>> aux = bytes([0] * 32)
@@ -170,9 +170,10 @@ Sign the message b"Secure Deterministic Nonce made!" with the private key 837,12
 >>> e = priv.even_secret()  #/
 >>> # use the 32-bytes of 0's for the auxillary
 >>> a = bytes([0] * 32)  #/
->>> # x=e⊕H(a) where ⊕ is xor_bytes, H is hash_aux and a is the auxillary
+>>> # x=e⊕H(a) where e is converted to bytes first ⊕ is xor_bytes, H is hash_aux and a is the auxillary
 >>> x = xor_bytes(int_to_big_endian(e, 32), hash_aux(a))  #/
 >>> # k=H(x||P||z) where H is hash_nonce, P is the xonly of the point and z is the message
+>>> # convert to integer after the hash
 >>> k = big_endian_to_int(hash_nonce(x + point.xonly() + msg))  #/
 >>> # calculate R which is kG
 >>> r = k * G  #/
@@ -241,15 +242,15 @@ Message 2 = af1c325abcb0cced3a4166ce67be1db659ae1dd574fe49b0f2941d8d4882d62c
 >>> s = (sig1.s + sig2.s) % N  #/
 >>> # define r as the signatures' r sum
 >>> r = sig1.r + sig2.r  #/
->>> # create the commitments: R_i||P_i||m_i
+>>> # create the commitments: R_i||P_i||z_i
 >>> commitment_1 = sig1.r.xonly() + p1.xonly() + msg1  #/
 >>> commitment_2 = sig2.r.xonly() + p2.xonly() + msg2  #/
 >>> # d_i are the challenges which are hash_challenge of the commitments as big endian integers
 >>> d1 = big_endian_to_int(hash_challenge(commitment_1)) % N  #/
 >>> d2 = big_endian_to_int(hash_challenge(commitment_2)) % N  #/
->>> # d is the sum of the d_i P_i's
+>>> # D is the sum of the d_i P_i's
 >>> d = d1*p1 + d2*p2  #/
->>> # check that sG=R+d
+>>> # check that sG=R+D
 >>> print(s*G == r+d)  #/
 True
 
@@ -361,11 +362,11 @@ tb1pfx2ys8pzcg0mdufk9v25hphv85zgjpv5kyn6uevdmfmvdsw0ea0qyvv87u
 """
 
 FUNCTIONS = """
-ecc.S256Point.verify_schnorr
-ecc.PrivateKey.sign_schnorr
 ecc.PrivateKey.bip340_k
+ecc.PrivateKey.sign_schnorr
+ecc.PrivateKey.tweaked_key
+ecc.S256Point.p2tr_script
 ecc.S256Point.tweak
 ecc.S256Point.tweaked_key
-ecc.S256Point.p2tr_script
-ecc.PrivateKey.tweaked_key
+ecc.S256Point.verify_schnorr
 """

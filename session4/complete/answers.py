@@ -63,18 +63,18 @@ KeyPath spend one of the UTXO to <code>tb1q7kn55vf3mmd40gyj46r245lw87dc6us5n50lr
 >>> from script import address_to_script_pubkey
 >>> from taproot import TapScript, TapLeaf
 >>> from tx import TxIn, TxOut, Tx
->>> from witness import Witness
 >>> my_secret = big_endian_to_int(sha256(b"jimmy@programmingblockchain.com"))  #/my_secret = big_endian_to_int(sha256(b"<my email address>"))
 >>> me = MuSigParticipant(PrivateKey(my_secret))
+>>> my_pubkey = me.point
 >>> neighbor_pubkey = S256Point.parse(bytes.fromhex("02e79c4eb45764bd015542f6779cc70fef44b7a2432f839264768288efab886291"))  #/neighbor_pubkey = S256Point.parse(bytes.fromhex("<my neighbor's sec pubkey>"))
->>> pubkeys = [me.point, neighbor_pubkey]
+>>> pubkeys = [my_pubkey, neighbor_pubkey]
 >>> keyagg = KeyAggregator(pubkeys)
 >>> group_point = keyagg.group_point
 >>> ts = TapScript([group_point.xonly(), 0xAC])
 >>> leaf = TapLeaf(ts)
 >>> merkle_root = leaf.hash()
 >>> coor = MuSigCoordinator(pubkeys, merkle_root)
->>> prev_tx = bytes.fromhex("7b4699e1154a38a63c560216f3481c19e97d4b07aa654f7a205442d7f7937710")  #/prev_tx = bytes.fromhex("<fiil me in>")
+>>> prev_tx = bytes.fromhex("7b4699e1154a38a63c560216f3481c19e97d4b07aa654f7a205442d7f7937710")  #/prev_tx = bytes.fromhex("<fill me in>")
 >>> prev_index = 0  #/prev_index = -1  # change me!
 >>> fee = 500
 >>> # create a transaction input with the previous tx and index
@@ -136,7 +136,6 @@ BONUS! Don't do this one unless you finished the previous exercise and have time
 >>> from script import address_to_script_pubkey
 >>> from taproot import TapScript, TapLeaf
 >>> from tx import TxIn, TxOut, Tx
->>> from witness import Witness
 >>> my_secret = big_endian_to_int(sha256(b"jimmy@programmingblockchain.com"))  #/my_secret = big_endian_to_int(sha256(b"<my email address>"))
 >>> me = MuSigParticipant(PrivateKey(my_secret))
 >>> my_pubkey = me.point
@@ -163,8 +162,8 @@ BONUS! Don't do this one unless you finished the previous exercise and have time
 >>> tx_obj = Tx(1, [tx_in], [tx_out], network="signet", segwit=True)  #/
 >>> # create the control block from the TapLeaf passing in the group point
 >>> cb = tap_leaf.control_block(group_point)  #/
->>> # set the tx_in's witness to be a new witness with two elements, the tap_script raw serialized and the control block serialized
->>> tx_in.witness = Witness([tap_script.raw_serialize(), cb.serialize()])  #/
+>>> # tx_in.initialize_p2tr_scriptpath with the tap script and control block
+>>> tx_in.initialize_p2tr_scriptpath(tap_script, cb)  #/
 >>> # set the message to be the sig_hash on index 0
 >>> msg = tx_obj.sig_hash(0)  #/
 >>> # generate a nonce
@@ -191,9 +190,9 @@ ddee9157385eeb894d15b547665555e5d79c12c596dc5b7e509b528d8f6c941a
 >>> # register your neighbor's partial sig
 >>> coor.register_partial_sig(neighbor_pubkey.sec(), neighbor_sig)  #/
 >>> # compute the schnorr signature and serialize it
->>> sig = coor.compute_sig()  #/
->>> # insert the sig in front of the other elements in the witness using tx_in.witness.items.insert
->>> tx_in.witness.items.insert(0, sig.serialize())  #/
+>>> sig = coor.compute_sig().serialize()  #/
+>>> # finalize_p2tr_scriptpath on tx_in with the sig
+>>> tx_in.finalize_p2tr_scriptpath(sig)  #/
 >>> # check that the transaction verifies
 >>> print(tx_obj.verify())  #/
 True
@@ -236,14 +235,14 @@ Create 7 shares whose threshold is 4
 >>> shares = {}  #/
 >>> # loop through 1 to 7 inclusive as the x values
 >>> for x in range(1, 8):  #/
-...    # set the y value to be 0
-...    y_value = 0  #/
-...    # loop through the coefficients with the loop index
-...    for i, coef in enumerate(coefficients):  #/
-...        # add the term coef * x^i to the y value
-...        y_value += coef * x ** i % N  #/
-...    # set the share of x to be the y value mod N
-...    shares[x] = y_value % N  #/
+...     # set the y value to be 0
+...     y_value = 0  #/
+...     # loop through the coefficients with the loop index
+...     for i, coef in enumerate(coefficients):  #/
+...         # add the term coef * x^i to the y value
+...         y_value += coef * x ** i % N  #/
+...     # set the share of x to be the y value mod N
+...     shares[x] = y_value % N  #/
 >>> # print the last share
 >>> print(shares[7])
 1350999874
@@ -335,13 +334,12 @@ Create a LaGrange polynomial of degree 4 where $X=\{2,5,8,9\}$ for participant 8
 #endcode
 #exercise
 
-Participants are $X=\{1,3,5,6\}$
-Participant 1 has $y_1=1913$
-Participant 3 has $y_3=1971$
-Participant 5 has $y_5=2009$
-Participant 6 has $y_6=2024$
+Recover the secret with these shares:
 
-Recover the secret
+* 1: 0x2af74354f6bb87c9daf213d08dd636ec9a8a9bea20769c04e06c9dff011fd581
+* 3: 0xcaafb3996ca0efc36cc27a7c00a4cd01f4db21a7aa4129e2a5d881dae1f3e73d
+* 5: 0xdb5aba8ec27c1ff2c83091853a3acd520b95a222df747ee0d80a43420825bf42
+* 6: 0x13813a40d12ae1ffdf27c1cb008a490862f9003fbeaf3e13af55f2df3e419b2b
 
 ----
 >>> # example of recovering the secret
@@ -349,10 +347,10 @@ Recover the secret
 >>> from secrets import randbelow
 >>> from frost import lagrange_coef
 >>> participants = [1, 3, 5, 6]
->>> share_1 = 1913
->>> share_3 = 1971
->>> share_5 = 2009
->>> share_6 = 2024
+>>> share_1 = 0x2af74354f6bb87c9daf213d08dd636ec9a8a9bea20769c04e06c9dff011fd581
+>>> share_3 = 0xcaafb3996ca0efc36cc27a7c00a4cd01f4db21a7aa4129e2a5d881dae1f3e73d
+>>> share_5 = 0xdb5aba8ec27c1ff2c83091853a3acd520b95a222df747ee0d80a43420825bf42
+>>> share_6 = 0x13813a40d12ae1ffdf27c1cb008a490862f9003fbeaf3e13af55f2df3e419b2b
 >>> # initialize the LaGrange values
 >>> g_1, g_3, g_5, g_6 = 1, 1, 1, 1  #/
 >>> # loop through the participants
@@ -370,7 +368,7 @@ Recover the secret
 >>> secret = (g_1*share_1 + g_3*share_3 + g_5*share_5 + g_6*share_6) % N  #/
 >>> # print the secret in hex
 >>> print(hex(secret))  #/
-0x751
+0xabacadaba123abacadaba123
 
 #endexercise
 #unittest
@@ -390,9 +388,14 @@ frost:LaGrangeTest:test_lagrange:
 >>> # Example of creating 3-of-5 FrostSigners
 >>> from frost import Dealer, FrostSigner
 >>> dealer = Dealer([21000000, 2000, 3000])
->>> signer_1 = FrostSigner(1, dealer.y_value(1), dealer.public_polynomial)
->>> print(signer_1.point.sec().hex())
+>>> for x in range(1, 6):
+...     signer = FrostSigner(x, dealer.y_value(x), dealer.public_polynomial)
+...     print(signer.point.sec().hex())
 02239ebf39e132124de2f7b16de42f8c277d0e7709e2639742348102303243c417
+020ac0bb6d6a1d089d0d48967e38862194ed853b24e30103e92dec365f209da7ec
+02004c6d43152ceb4b223abf96195a63d204deabb7c5897c78e81183b447a48fcc
+02af4f5bdad51bd2cc3f49fe162701b97d3d3253b0609f8226a68eb071352a20ff
+03b3a94860f86be63486d41c824df0b103f979f43372421ef6e99c8dba56a1f03a
 
 #endcode
 #exercise
@@ -530,7 +533,7 @@ Participant 2's $l$ and $m$: 5000, 6000
 ...     y = N - participant_2.private_key.secret  #/
 >>> # use the lagrange_coef function to get the lagrange coefficient (c_i = g_i(x_i))
 >>> c = lagrange_coef(participants, 2)  #/
->>> # use the context's challenge method to get the group challenge (d = H(R||P||z))
+>>> # use the context's challenge property to get the group challenge (d = H(R||P||z))
 >>> d = context.challenge  #/
 >>> # now get the partial signature s_i = k + c_i * d * y_i mod N
 >>> s = (k + c * d * y) % N  #/
@@ -561,7 +564,7 @@ Verify the partial signature for participant 2
 >>> coor.register_nonce_share(2, nonce_share_2)
 >>> # fill in what s equals from the last exercise
 >>> s = 0x82f5ea3360c82882a851abf95324d079392fd0c70d7e56a15e0aa8e5c3fb983f  #/
->>> # create the signing context, which should aggregate the points
+>>> # create the signing context
 >>> context = coor.create_signing_context(msg)  #/
 >>> # determine the second participant's nonce point (R_i) from the nonce point's evenness
 >>> if context.nonce_point.even:  #/

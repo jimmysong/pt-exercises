@@ -143,7 +143,7 @@ tx_in.finalize_p2tr_keypath(sig)
   <section>
     <h2>Exercises</h2>
     <ol start="1">
-      <li> You have been sent 2 UTXOs to the address you created in the last session. KeyPath spend one of the UTXO to <code>tb1q7kn55vf3mmd40gyj46r245lw87dc6us5n50lrg</code>.
+      <li> You have been sent 2 UTXOs to the address you created in the last session. KeyPath spend one of the UTXOs to <code>tb1q7kn55vf3mmd40gyj46r245lw87dc6us5n50lrg</code>.
 
       <li> BONUS! You have been sent 2 UTXOs to the address you created in the last session. ScriptPath spend the UTXO you haven't spent yet to the same address.
     </ol>
@@ -308,12 +308,7 @@ print(hex(secret))
   <section>
     <h2>Exercises</h2>
     <ol start="5">
-      <li>Participants are $X=\{1,3,5,6\}$.
-Participant 1 has $y_1=1913$.
-Participant 3 has $y_3=1971$.
-Participant 5 has $y_5=2009$.
-Participant 6 has $y_6=2024$.
-        Recover the secret
+      <li>Participants are $X=\{1,3,5,6\}$ with shares described in the exercise. Recover the secret.
       <li>Make this test pass: <code>frost:LaGrangeTest:test_lagrange</code>
 
     </ol>
@@ -337,7 +332,7 @@ Participant 6 has $y_6=2024$.
     <h2>Dealer Key Generation</h2>
     <ul>
       <li class="fragment">Exactly as Shamir Secret Sharing, a private polynomial $f(x)=e+a_1x+a_2x^2...a_{t-1}x^{t-1}$ where secret is $e$ and $a_i$ is random
-      <li class="fragment">$y$ values at each $x$ are distributed as shares to signers
+      <li class="fragment">The $y$ values at each $x$ are distributed as shares to signers
       <li class="fragment">We create a public polynomial $F(x)$ which is $f(x)$ multiplied by $G$, $F(x)=f(x)G$ $F(x)=eG+a_1xG+a_2x^2G+...+a_{t-1}x^{t-1}G$
       <li class="fragment">Note $F(x)=P+xA_1+x^2A_2+...+x^{t-1}A_{t-1}$ where $a_iG=A_i$. Note $F(0)=P$
     </ul>
@@ -347,7 +342,7 @@ Participant 6 has $y_6=2024$.
     <ul>
       <li class="fragment">$F(x)$ is a public polynomial to the signers
       <li class="fragment">Each signer once receiving the secret $y_i=f(x_i)$, verifies by checking $y_iG=F(x_i)$
-      <li class="fragment">This $y_iG=F(x_i)=P_i$ is public.
+      <li class="fragment">This $y_iG=F(x_i)=P_i$ is public. Everyone is aware of all signers' $x_i$ and $P_i$
     </ul>
   </section>
   <section>
@@ -600,7 +595,7 @@ print(tx_obj.serialize().hex())
       <li class="fragment">CISA (Cross-Input Signature Aggregation)
       <li class="fragment">Various ways to do TapRoot MultiSig
       <li class="fragment">MuSig Nonce Generation
-      <li class="fragment">FROST distributed Key Generation.
+      <li class="fragment">FROST distributed Key Generation
     </ul>
   </section>
   <section>

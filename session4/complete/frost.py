@@ -254,7 +254,7 @@ class FrostSigner:
         else:
             # y_i is N minus the secret
             y = N - self.private_key.secret
-        # s_i = k + c_i * d * y_i, where d is the challenge
+        # s_i = k + c_i * d * y_i (mod N), where d is the challenge
         s = (k + c * d * y) % N
         # the partial signature is s as big endian, 32 bytes
         partial_sig = int_to_big_endian(s, 32)

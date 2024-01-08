@@ -385,7 +385,7 @@ class S256Point(Point):
         # if the sig's R is the point at infinity, return False
         if sig.r.x is None:
             return False
-        # commitment is R||P||m use the xonly serializations
+        # commitment is R||P||z use the xonly serializations
         commitment = sig.r.xonly() + point.xonly() + msg
         # d is the hash_challenge of the commitment as a big endian integer
         d = big_endian_to_int(hash_challenge(commitment))
@@ -528,7 +528,7 @@ class TapRootTest(TestCase):
 
 
 class SchnorrTest(TestCase):
-    def test_verify(self):
+    def test_verify_schnorr(self):
         msg = sha256(b"I attest to understanding Schnorr Signatures")
         sig_raw = bytes.fromhex(
             "f3626c99fe36167e5fef6b95e5ed6e5687caa4dc828986a7de8f9423c0f77f9bc73091ed86085ce43de0e255b3d0afafc7eee41ddc9970c3dc8472acfcdfd39a"
@@ -541,7 +541,7 @@ class SchnorrTest(TestCase):
         )
         self.assertTrue(point.verify_schnorr(msg, sig))
 
-    def test_sign(self):
+    def test_sign_schnorr(self):
         msg = sha256(b"I attest to understanding Schnorr Signatures")
         priv = PrivateKey(12345)
         sig = priv.sign_schnorr(msg)
@@ -686,7 +686,7 @@ class PrivateKey:
             raise ValueError("msg needs to be 32 bytes")
         # set e to be the even secret
         e = self.even_secret()
-        # x = e ⊕ H(aux) where H is hash_aux and e is bytes
+        # x = e ⊕ H(aux) where H is hash_aux and e is converted to 32 bytes
         x = xor_bytes(int_to_big_endian(e, 32), hash_aux(aux))
         # return the hash_nonce of the x, point as xonly and the message interpreted as big endian
         return big_endian_to_int(hash_nonce(x + self.point.xonly() + msg))
@@ -694,7 +694,7 @@ class PrivateKey:
     def sign_schnorr(self, msg, aux=None):
         # e is the secret that generates an even P with the even_secret method
         e = self.even_secret()
-        # get the nonce, k, using the self.bip340_k method if in exercise 5, use randbelow(N) in exercise 4
+        # get the nonce, k, using the self.bip340_k method if in exercise 6, use randbelow(N) in exercise 4
         k = self.bip340_k(msg, aux)
         # get the resulting R=kG point
         r = k * G

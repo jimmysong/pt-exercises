@@ -44,6 +44,9 @@ class TapLeaf:
         # return the hash_tapleaf of the preimage
         raise NotImplementedError
 
+    def leaves(self):
+        return [self]
+
     def path_hashes(self, leaf=None):
         return []
 

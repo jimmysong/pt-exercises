@@ -136,7 +136,7 @@
   <section>
     <h2>Example Schnorr Verification</h2>
     <pre><code data-trim data-noescape class="python">
-from ecc import S256Point, SchnorrSignature, G, N
+from ecc import S256Point, SchnorrSignature, G
 from hash import hash_challenge
 from helper import big_endian_to_int
 msg = b"I'm learning Schnorr Signatures!"
@@ -145,7 +145,7 @@ sig = SchnorrSignature.parse(sig_raw)
 xonly = bytes.fromhex("a8a28557947025fe0646660677c09a757a3bce148d99fac9368439a13df6ea1a")
 p = S256Point.parse(xonly)
 preimage = sig.r.xonly() + p.xonly() + msg
-d = big_endian_to_int(hash_challenge(preimage)) % N
+d = big_endian_to_int(hash_challenge(preimage))
 target = sig.s * G - d * p
 print(target == sig.r)
     </code></pre>
@@ -154,7 +154,7 @@ print(target == sig.r)
     <h2><b>Exercises</b></h2>
     <ol start="1">
       <li>Verify a Schnorr Signature
-      <li>Make this test pass: <code>ecc:SchnorrTest:test_verify</code>
+      <li>Make this test pass: <code>ecc:SchnorrTest:test_verify_schnorr</code>
     </ol>
   </section>
 </section>
@@ -196,7 +196,7 @@ print(sig.serialize().hex())
     <h2><b>Exercises</b></h2>
     <ol start="3">
       <li>Sign the message "Schnorr Signatures adopt Taproot" with the private key 21,000,000
-      <li>Make this test pass: <code>ecc:SchnorrTest:test_sign</code>
+      <li>Make this test pass: <code>ecc:SchnorrTest:test_sign_schnorr</code>
     </ol>
   </section>
 </section>
@@ -218,7 +218,7 @@ print(sig.serialize().hex())
     <h2>Implementation</h2>
     <ul>
       <li class="fragment">Start with a random number $a$, which is then hashed
-      <li class="fragment">Xor the result $\mathcal{H_1}(a)$ with the secret $e$
+      <li class="fragment">Xor $\oplus$ the result $\mathcal{H_1}(a)$ with the secret $e$
       <li class="fragment">Then hash with the message $z$ to generate the $k$
       <li class="fragment">$P=eG$, $\mathcal{H_1}$ is <code>hash_aux</code>, $\mathcal{H_2}$ is <code>hash_nonce</code>
       <li class="fragment">$x = \mathcal{H_1}(a) \oplus e$, $k=\mathcal{H_2}(x||P||z)$
@@ -229,7 +229,7 @@ print(sig.serialize().hex())
   <section>
     <h2>Nonce Creation</h2>
     <pre><code data-trim data-noescape class="python">
-from ecc import PrivateKey, N
+from ecc import PrivateKey
 from hash import sha256, hash_aux, hash_nonce
 from helper import big_endian_to_int, int_to_big_endian, xor_bytes
 aux = bytes([0] * 32)
@@ -238,7 +238,7 @@ p = private_key.point
 e = private_key.even_secret()
 msg = sha256(b"Nonce generation is spectacular!")
 x = xor_bytes(int_to_big_endian(e, 32), hash_aux(aux))
-k = big_endian_to_int(hash_nonce(x + p.xonly() + msg)) % N
+k = big_endian_to_int(hash_nonce(x + p.xonly() + msg))
 print(hex(k))
 </code></pre>
   </section>
@@ -345,7 +345,7 @@ print(hex(k))
     <ul>
       <li class="fragment">KeyPath Spend (single-key like p2pkh and p2wpkh)
       <li class="fragment">ScriptPath Spend (arbitrary script like p2sh and p2wsh)
-      <li class="fragment">ScriptPath is a Merkle Tree of TapScripts
+      <li class="fragment">ScriptPath is a Merkle Tree of TapScripts (Merklized Abstract Syntax Tree, or MAST)
       <li class="fragment">TapScripts are like Script, but with slightly different OP codes (defined in BIP342)
     </ul>
   </section>
